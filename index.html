@@ -1,0 +1,864 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>敏捷硬件研发协同台 | 控制中心</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css">
+    <script src="https://unpkg.com/element-plus/dist/index.full.js"></script>
+    <script src="https://unpkg.com/@element-plus/icons-vue"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            corePlugins: { preflight: false },
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#2563EB'
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        
+        * { font-family: 'Inter', sans-serif; }
+        body { background-color: #F8FAFC; color: #0F172A; }
+        
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #F1F5F9; }
+        ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94A3B8; }
+
+        .add-card-hover:hover {
+            border-color: #3B82F6;
+            background-color: #EFF6FF;
+        }
+    </style>
+</head>
+<body class="min-h-screen">
+    <div id="app">
+        <el-container class="h-screen flex flex-col">
+            <el-header class="bg-white border-b border-gray-200 shadow-sm">
+                <div class="flex items-center justify-center h-full">
+                    <h1 class="text-xl font-bold tracking-tight">
+                        <span class="text-blue-600">敏捷硬件研发协同台</span>
+                        <span class="text-gray-400 mx-2">|</span>
+                        <span class="text-gray-800">控制中心</span>
+                    </h1>
+                </div>
+            </el-header>
+
+            <el-container class="flex-1 overflow-hidden">
+                <el-aside width="280px" class="bg-white border-r border-gray-200">
+                    <div class="p-4 border-b border-gray-100">
+                        <h2 class="text-sm font-semibold text-gray-700 uppercase tracking-wider flex items-center">
+                            <el-icon><FolderOpened class="w-4 h-4 mr-2 text-gray-400" /></el-icon>
+                            客户项目
+                        </h2>
+                    </div>
+                    <el-tree
+                        :data="treeData"
+                        :props="treeProps"
+                        :lazy="true"
+                        :load="loadBomVersions"
+                        node-key="id"
+                        highlight-current
+                        @node-click="handleNodeClick"
+                        class="p-2"
+                    >
+                        <template #default="{ data }">
+                            <div class="flex items-center justify-between w-full">
+                                <span>{{ data.name }}</span>
+                                <el-tag v-if="data.status" :type="data.status === 'active' ? 'success' : 'info'" size="small">
+                                    {{ data.status === 'active' ? '启用' : '封存' }}
+                                </el-tag>
+                            </div>
+                        </template>
+                    </el-tree>
+                </el-aside>
+
+                <el-main class="bg-gray-50 overflow-y-auto p-6">
+                    <div v-if="!selectedItem" class="h-full flex flex-col items-center justify-center text-gray-400">
+                        <el-icon><Document class="w-16 h-16 mb-4 text-gray-300" /></el-icon>
+                        <p class="text-lg text-gray-500">选择左侧项目或 BOM 版本查看详情</p>
+                    </div>
+
+                    <div v-else-if="selectedItem.type === 'product'" class="space-y-6">
+                        <el-card shadow="hover">
+                            <template #header>
+                                <div class="flex items-center justify-between">
+                                    <div class="flex items-center space-x-3">
+                                        <el-tag size="medium">{{ selectedItem.data.code }}</el-tag>
+                                        <el-tag :type="selectedItem.data.status === 'active' ? 'success' : 'info'" size="medium">
+                                            {{ selectedItem.data.status === 'active' ? '启用' : '封存' }}
+                                        </el-tag>
+                                    </div>
+                                    <span class="text-sm text-gray-400">{{ formatDate(selectedItem.data.created_at) }}</span>
+                                </div>
+                            </template>
+                            <h2 class="text-2xl font-bold text-gray-900 mb-2">{{ selectedItem.data.name }}</h2>
+                            <p v-if="selectedItem.data.description" class="text-gray-500">{{ selectedItem.data.description }}</p>
+                        </el-card>
+
+                        <el-card shadow="hover">
+                            <template #header>
+                                <div class="flex items-center justify-between">
+                                    <span class="flex items-center space-x-2">
+                                        <el-icon><GitBranch class="w-5 h-5 text-blue-600" /></el-icon>
+                                        <span class="font-semibold">BOM 版本管理</span>
+                                    </span>
+                                    <div class="flex items-center space-x-2">
+                                        <el-button size="small" type="primary" @click="openCreateBomVersionDialog">
+                                            <el-icon><Plus class="w-4 h-4 mr-1" /></el-icon>
+                                            创建新 BOM 版本
+                                        </el-button>
+                                        <el-button size="small" @click="openImportExcelDialog">
+                                            <el-icon><Upload class="w-4 h-4 mr-1" /></el-icon>
+                                            导入客户 Excel BOM
+                                        </el-button>
+                                    </div>
+                                </div>
+                            </template>
+                            <div class="p-4 bg-blue-50 rounded-lg">
+                                <div class="flex items-start space-x-3">
+                                    <el-icon class="w-5 h-5 text-blue-500 mt-0.5"><InfoFilled /></el-icon>
+                                    <div>
+                                        <p class="text-sm font-medium text-blue-800">录入物料前，请先创建一个 BOM 版本！</p>
+                                        <p class="text-xs text-blue-600 mt-1">每次客户发来新的 BOM，点击"创建新 BOM 版本"即可自动封存旧版本。</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </el-card>
+
+                        <el-card shadow="hover">
+                            <template #header>
+                                <div class="flex items-center justify-between">
+                                    <span class="flex items-center space-x-2">
+                                        <el-icon><FileText class="w-5 h-5 text-blue-600" /></el-icon>
+                                        <span class="font-semibold">产品级全局文件</span>
+                                    </span>
+                                    <el-button size="small" type="primary" @click="openCreateDocumentDialog">
+                                        <el-icon><Plus class="w-4 h-4 mr-1" /></el-icon>
+                                        新增全局文件
+                                    </el-button>
+                                </div>
+                            </template>
+                            <div v-if="globalDocuments.length === 0" class="border-2 border-dashed border-gray-300 rounded-lg p-12 flex flex-col items-center justify-center add-card-hover transition-all duration-200 cursor-pointer" @click="openCreateDocumentDialog">
+                                <el-icon class="w-16 h-16 text-gray-400 mb-4"><Plus /></el-icon>
+                                <p class="text-gray-500 text-sm">添加产品级文件（如：PRD、总装 SOP、整体测试规范等）</p>
+                            </div>
+                            <el-row :gutter="20" v-else>
+                                <el-col :xs="24" :sm="12" :lg="8" v-for="doc in globalDocuments" :key="doc.id">
+                                    <el-card shadow="hover" class="bg-gradient-to-br from-blue-50 to-blue-100">
+                                        <div class="flex items-start justify-between mb-2">
+                                            <span class="font-semibold">{{ doc.title }}</span>
+                                            <el-tag size="small" type="primary">v{{ doc.version }}</el-tag>
+                                        </div>
+                                        <p v-if="doc.update_notes" class="text-xs text-gray-500 mb-3">{{ doc.update_notes }}</p>
+                                        <a :href="getDriveFileUrl(doc.google_drive_id)" target="_blank" class="text-xs text-blue-600 flex items-center">
+                                            <el-icon><ExternalLink class="w-3 h-3 mr-1" /></el-icon>
+                                            查看文件
+                                        </a>
+                                    </el-card>
+                                </el-col>
+                            </el-row>
+                        </el-card>
+                    </div>
+
+                    <div v-else-if="selectedItem.type === 'bom_version'" class="space-y-6">
+                        <el-card shadow="hover">
+                            <template #header>
+                                <div class="flex items-center justify-between">
+                                    <div class="flex items-center space-x-3">
+                                        <el-tag size="medium">{{ currentProduct?.code || '-' }}</el-tag>
+                                        <el-tag :type="selectedItem.data.status === 'active' ? 'success' : 'info'" size="medium">
+                                            {{ selectedItem.data.status === 'active' ? '启用' : '封存' }}
+                                        </el-tag>
+                                    </div>
+                                    <div class="text-right text-sm text-gray-500">
+                                        <div>接收时间: {{ formatDate(selectedItem.data.received_at) }}</div>
+                                        <div v-if="selectedItem.data.created_by">接收人: {{ selectedItem.data.created_by }}</div>
+                                    </div>
+                                </div>
+                            </template>
+                            <h2 class="text-2xl font-bold text-gray-900 mb-2">{{ selectedItem.data.version_code }}</h2>
+                            <p v-if="selectedItem.data.change_notes" class="text-gray-500">{{ selectedItem.data.change_notes }}</p>
+                        </el-card>
+
+                        <el-card shadow="hover">
+                            <template #header>
+                                <div class="flex items-center justify-between">
+                                    <span class="flex items-center space-x-2">
+                                        <el-icon><Grid class="w-5 h-5 text-blue-600" /></el-icon>
+                                        <span class="font-semibold">BOM 视图管理</span>
+                                    </span>
+                                    <el-button size="small" type="primary" @click="openImportDialog">
+                                        <el-icon><Link class="w-4 h-4 mr-1" /></el-icon>
+                                        导入 Google Drive BOM 链接
+                                    </el-button>
+                                </div>
+                            </template>
+                            <el-tabs v-model="activeBomTab" type="card">
+                                <el-tab-pane name="macro">
+                                    <template #label>
+                                        <span class="flex items-center space-x-1">
+                                            <el-icon><Box class="w-4 h-4" /></el-icon>
+                                            <span>模组与核心部件 (Macro View)</span>
+                                        </span>
+                                    </template>
+                                    <div class="p-4 bg-blue-50 rounded-lg mb-4">
+                                        <div class="flex items-start space-x-3">
+                                            <el-icon class="w-5 h-5 text-blue-500 mt-0.5"><InfoFilled /></el-icon>
+                                            <div>
+                                                <p class="text-sm font-medium text-blue-800">展示整机项目的核心模组与部件（PCBA、散热器、外壳、包材等）</p>
+                                                <p class="text-xs text-blue-600 mt-1">适用于 Turnkey 项目经理快速把控全局，不展示底层电容电阻等微细节。</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div v-if="macroItems.length === 0" class="border-2 border-dashed border-gray-300 rounded-lg p-12 flex flex-col items-center justify-center add-card-hover transition-all duration-200 cursor-pointer" @click="openAddItemDialog">
+                                        <el-icon class="w-16 h-16 text-gray-400 mb-4"><Plus /></el-icon>
+                                        <p class="text-gray-500 text-sm">还没有模组数据，点击此处开始录入</p>
+                                        <p class="text-gray-400 text-xs mt-2">建议录入：PCBA 主板、散热组件、CNC 外壳、包材套件</p>
+                                    </div>
+                                    <el-row :gutter="16" v-else>
+                                        <el-col :xs="12" :sm="8" :lg="6" :xl="5" v-for="item in macroItems" :key="item.id">
+                                            <el-card shadow="hover" class="overflow-hidden relative">
+                                                <div class="h-36 bg-gray-100 flex items-center justify-center overflow-hidden mb-3">
+                                                    <img 
+                                                        v-if="item.picture_drive_id"
+                                                        :src="getDriveImageUrl(item.picture_drive_id)"
+                                                        :alt="item.name"
+                                                        class="w-full h-full object-cover"
+                                                        @error="handleImageError"
+                                                    >
+                                                    <el-icon v-else><Image class="w-12 h-12 text-gray-300" /></el-icon>
+                                                </div>
+                                                <div class="flex items-center justify-between mb-1">
+                                                    <span class="text-xs font-mono text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">{{ item.mpn }}</span>
+                                                    <el-tag :type="getStatusTagType(item.status)" size="small">
+                                                        {{ getStatusLabel(item.status) }}
+                                                    </el-tag>
+                                                </div>
+                                                <div class="text-sm font-semibold text-gray-900 mb-2 truncate">{{ item.name }}</div>
+                                                <div class="text-xs text-gray-500 space-y-1">
+                                                    <div class="flex justify-between">
+                                                        <span>位号</span>
+                                                        <span class="font-mono">{{ item.designator }}</span>
+                                                    </div>
+                                                    <div class="flex justify-between">
+                                                        <span>用量</span>
+                                                        <span class="font-mono">{{ item.quantity }}</span>
+                                                    </div>
+                                                    <div class="flex justify-between">
+                                                        <span>分类</span>
+                                                        <span>{{ item.category }}</span>
+                                                    </div>
+                                                </div>
+                                                <div v-if="item.responsible" class="mt-2 pt-2 border-t border-gray-100 flex items-center space-x-1.5">
+                                                    <el-icon><User class="w-3 h-3 text-gray-400" /></el-icon>
+                                                    <span class="text-xs text-gray-500">{{ item.responsible }}</span>
+                                                </div>
+                                                <div class="mt-3 flex justify-end">
+                                                    <el-button size="small" type="primary" plain @click="openEditDialog(item)">
+                                                        <el-icon><Edit class="w-3 h-3 mr-1" /></el-icon>
+                                                        编辑
+                                                    </el-button>
+                                                </div>
+                                            </el-card>
+                                        </el-col>
+                                        <el-col :xs="12" :sm="8" :lg="6" :xl="5">
+                                            <div class="border-2 border-dashed border-gray-300 rounded-lg p-6 flex flex-col items-center justify-center h-full add-card-hover transition-all duration-200 cursor-pointer" @click="openAddItemDialog">
+                                                <el-icon class="w-12 h-12 text-gray-400 mb-2"><Plus /></el-icon>
+                                                <p class="text-gray-500 text-xs text-center">新增模组部件</p>
+                                            </div>
+                                        </el-col>
+                                    </el-row>
+                                </el-tab-pane>
+                                <el-tab-pane name="micro">
+                                    <template #label>
+                                        <span class="flex items-center space-x-1">
+                                            <el-icon><Document class="w-4 h-4" /></el-icon>
+                                            <span>ECN 变更与底层明细 (Micro View)</span>
+                                        </span>
+                                    </template>
+                                    <div class="p-4 bg-orange-50 rounded-lg mb-4">
+                                        <div class="flex items-start space-x-3">
+                                            <el-icon class="w-5 h-5 text-orange-500 mt-0.5"><Warning /></el-icon>
+                                            <div>
+                                                <p class="text-sm font-medium text-orange-800">系统将在此自动解析并比对底层的具体元器件变更</p>
+                                                <p class="text-xs text-orange-600 mt-1">例如：R12 电阻替换为更大封装，新增 U1 芯片，删除 C5 电容等。</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <el-table :data="ecnDemoData" stripe border style="width: 100%">
+                                        <el-table-column prop="ref" label="位号" width="80" />
+                                        <el-table-column prop="old_mpn" label="旧版本 MPN" width="180">
+                                            <template #default="{ row }">
+                                                <span v-if="row.change_type === 'deleted'" class="text-red-600 bg-red-50 px-2 py-1 rounded font-mono">
+                                                    {{ row.old_mpn }}
+                                                </span>
+                                                <span v-else-if="row.change_type === 'modified'" class="text-orange-600 bg-orange-50 px-2 py-1 rounded font-mono">
+                                                    {{ row.old_mpn }}
+                                                </span>
+                                                <span v-else class="text-gray-500">{{ row.old_mpn || '-' }}</span>
+                                            </template>
+                                        </el-table-column>
+                                        <el-table-column prop="new_mpn" label="新版本 MPN" width="180">
+                                            <template #default="{ row }">
+                                                <span v-if="row.change_type === 'added'" class="text-green-600 bg-green-50 px-2 py-1 rounded font-mono">
+                                                    {{ row.new_mpn }}
+                                                </span>
+                                                <span v-else-if="row.change_type === 'modified'" class="text-blue-600 bg-blue-50 px-2 py-1 rounded font-mono">
+                                                    {{ row.new_mpn }}
+                                                </span>
+                                                <span v-else class="text-gray-500">{{ row.new_mpn || '-' }}</span>
+                                            </template>
+                                        </el-table-column>
+                                        <el-table-column prop="category" label="分类" width="100" />
+                                        <el-table-column prop="change_type" label="变更类型" width="120">
+                                            <template #default="{ row }">
+                                                <el-tag :type="getEcnTagType(row.change_type)" size="small">
+                                                    {{ getEcnLabel(row.change_type) }}
+                                                </el-tag>
+                                            </template>
+                                        </el-table-column>
+                                        <el-table-column prop="description" label="变更说明" />
+                                    </el-table>
+                                    <div class="mt-4 flex justify-end">
+                                        <el-button size="small" disabled>
+                                            <el-icon><Download class="w-4 h-4 mr-1" /></el-icon>
+                                            导出 ECN 报告 (待实现)
+                                        </el-button>
+                                    </div>
+                                </el-tab-pane>
+                            </el-tabs>
+                        </el-card>
+                    </div>
+                </el-main>
+            </el-container>
+        </el-container>
+
+        <el-dialog v-model="editDialogVisible" :title="dialogMode === 'create' ? '新增物料信息' : '编辑物料信息'" width="500px">
+            <el-form :model="editForm" label-width="80px">
+                <el-form-item label="物料名称" v-if="dialogMode === 'create'" required>
+                    <el-input v-model="editForm.name" placeholder="输入物料名称（如：STM32F405RGT6 微控制器）" />
+                </el-form-item>
+                <el-form-item label="MPN" required>
+                    <el-input v-model="editForm.mpn" placeholder="输入客户指定的厂商料号" />
+                </el-form-item>
+                <el-form-item label="位号">
+                    <el-input v-model="editForm.designator" placeholder="输入位号（如：U1, C24, R101）" />
+                </el-form-item>
+                <el-form-item label="用量">
+                    <el-input-number v-model="editForm.quantity" :min="1" placeholder="输入用量" />
+                </el-form-item>
+                <el-form-item label="分类">
+                    <el-select v-model="editForm.category" placeholder="选择分类">
+                        <el-option label="EE 电子料" value="EE" />
+                        <el-option label="ME 结构件" value="ME" />
+                        <el-option label="PKG 包装" value="PKG" />
+                        <el-option label="Chemical 化学品" value="Chemical" />
+                    </el-select>
+                </el-form-item>
+                <el-form-item label="负责人">
+                    <el-input v-model="editForm.responsible" placeholder="输入负责人姓名" />
+                </el-form-item>
+                <el-form-item label="定型状态">
+                    <el-tag
+                        v-for="status in statusOptions"
+                        :key="status.value"
+                        :type="status.type"
+                        :closable="false"
+                        :effect="editForm.status === status.value ? 'dark' : 'plain'"
+                        @click="editForm.status = status.value"
+                        class="cursor-pointer mr-2 mb-2"
+                    >
+                        {{ status.label }}
+                    </el-tag>
+                </el-form-item>
+                <el-form-item label="图片 ID">
+                    <el-input v-model="editForm.picture_drive_id" placeholder="在此粘贴 Google Drive 文件的共享 ID (如 1-vR_k...)" />
+                </el-form-item>
+            </el-form>
+            <template #footer>
+                <el-button @click="editDialogVisible = false">取消</el-button>
+                <el-button type="primary" @click="saveItem">保存</el-button>
+            </template>
+        </el-dialog>
+
+        <el-dialog v-model="bomVersionDialogVisible" title="创建新 BOM 版本" width="500px">
+            <el-form :model="bomVersionForm" label-width="100px">
+                <el-form-item label="版本号" required>
+                    <el-input v-model="bomVersionForm.version_code" placeholder="输入版本号（如：V2.0, V3.1_Beta）" />
+                </el-form-item>
+                <el-form-item label="变更说明">
+                    <el-input type="textarea" v-model="bomVersionForm.change_notes" placeholder="描述本次 BOM 变更的主要内容（如：客户升级了 MCU）" />
+                </el-form-item>
+                <el-form-item label="接收时间">
+                    <el-date-picker v-model="bomVersionForm.received_at" type="datetime" placeholder="选择客户提供 BOM 的时间" />
+                </el-form-item>
+                <el-form-item label="接收人">
+                    <el-input v-model="bomVersionForm.created_by" placeholder="输入接收人姓名" />
+                </el-form-item>
+            </el-form>
+            <template #footer>
+                <el-button @click="bomVersionDialogVisible = false">取消</el-button>
+                <el-button type="primary" @click="createBomVersion">创建版本</el-button>
+            </template>
+        </el-dialog>
+
+        <el-dialog v-model="documentDialogVisible" title="新增产品级文件" width="500px">
+            <el-form :model="documentForm" label-width="100px">
+                <el-form-item label="文件标题" required>
+                    <el-input v-model="documentForm.title" placeholder="输入文件标题（如：产品测试规范书）" />
+                </el-form-item>
+                <el-form-item label="文件类型">
+                    <el-select v-model="documentForm.document_type" placeholder="选择文件类型">
+                        <el-option label="图纸 (Drawing)" value="drawing" />
+                        <el-option label="规格书 (Spec)" value="spec" />
+                        <el-option label="测试报告 (Test Report)" value="test_report" />
+                        <el-option label="认证证书 (Certificate)" value="certificate" />
+                        <el-option label="包装规范 (Package)" value="package" />
+                        <el-option label="操作手册 (Manual)" value="manual" />
+                    </el-select>
+                </el-form-item>
+                <el-form-item label="版本号">
+                    <el-input v-model="documentForm.version" placeholder="输入版本号（如：1.0, V2.0）" />
+                </el-form-item>
+                <el-form-item label="Drive ID" required>
+                    <el-input v-model="documentForm.google_drive_id" placeholder="在此粘贴 Google Drive 文件的共享 ID" />
+                </el-form-item>
+                <el-form-item label="更新说明">
+                    <el-input type="textarea" v-model="documentForm.update_notes" placeholder="描述本次更新的内容" />
+                </el-form-item>
+            </el-form>
+            <template #footer>
+                <el-button @click="documentDialogVisible = false">取消</el-button>
+                <el-button type="primary" @click="createDocument">添加文件</el-button>
+            </template>
+        </el-dialog>
+
+        <el-dialog v-model="importDialogVisible" title="导入客户 Excel BOM" width="600px">
+            <div class="flex flex-col items-center justify-center py-8">
+                <el-icon class="w-16 h-16 text-gray-400 mb-4"><Upload /></el-icon>
+                <p class="text-gray-500 text-center mb-6">暂未实现 Excel 批量导入功能，请先使用"创建新 BOM 版本" + "手动录入新物料"的方式录入数据。</p>
+                <div class="bg-gray-50 rounded-lg p-4 w-full">
+                    <p class="text-sm font-medium text-gray-700 mb-2">推荐数据录入流程：</p>
+                    <ol class="text-xs text-gray-500 space-y-1">
+                        <li>1. 在产品主页点击"创建新 BOM 版本"</li>
+                        <li>2. 输入版本号和变更说明</li>
+                        <li>3. 进入版本详情页，点击"手动录入新物料"</li>
+                        <li>4. 填写 MPN、位号、用量等信息</li>
+                    </ol>
+                </div>
+            </div>
+            <template #footer>
+                <el-button type="primary" @click="importDialogVisible = false">我知道了</el-button>
+            </template>
+        </el-dialog>
+    </div>
+
+    <script>
+        const { createApp, ref, computed, onMounted } = Vue;
+        const { ElMessage } = ElementPlus;
+
+        const API_BASE = 'http://127.0.0.1:8080';
+
+        const app = createApp({
+            setup() {
+                const treeData = ref([]);
+                const selectedItem = ref(null);
+                const bomItems = ref([]);
+                const globalDocuments = ref([]);
+                
+                const apiStatus = ref('disconnected');
+                const currentTime = ref('');
+
+                const dialogMode = ref('edit');
+                const editDialogVisible = ref(false);
+                const editForm = ref({
+                    id: null,
+                    bom_version_id: null,
+                    name: '',
+                    mpn: '',
+                    designator: '',
+                    quantity: 1,
+                    category: '',
+                    responsible: '',
+                    status: '',
+                    picture_drive_id: ''
+                });
+
+                const bomVersionDialogVisible = ref(false);
+                const bomVersionForm = ref({
+                    version_code: '',
+                    change_notes: '',
+                    received_at: '',
+                    created_by: ''
+                });
+
+                const documentDialogVisible = ref(false);
+                const documentForm = ref({
+                    title: '',
+                    document_type: '',
+                    version: '',
+                    google_drive_id: '',
+                    update_notes: ''
+                });
+
+                const importDialogVisible = ref(false);
+
+                const activeBomTab = ref('macro');
+
+                const macroItems = computed(() => {
+                    const macroCategories = ['ME', 'PKG', 'Assembly', 'Module'];
+                    return bomItems.value.filter(item => macroCategories.includes(item.category) || (item.category === 'EE' && item.mpn && item.mpn.length > 15));
+                });
+
+                const ecnDemoData = ref([
+                    { ref: 'U1', old_mpn: 'STM32F103RCT6', new_mpn: 'STM32F405RGT6', category: 'EE', change_type: 'modified', description: 'MCU 升级至更高性能版本' },
+                    { ref: 'C24', old_mpn: '10uF 0603 16V', new_mpn: '10uF 0402 10V', category: 'EE', change_type: 'modified', description: '电容封装小型化' },
+                    { ref: 'L5', old_mpn: null, new_mpn: '2.2uH 2A 顶盟', category: 'EE', change_type: 'added', description: '新增功率电感' },
+                    { ref: 'R12', old_mpn: '10K 0603', new_mpn: null, category: 'EE', change_type: 'deleted', description: '删除冗余电阻' },
+                    { ref: 'C5', old_mpn: '100nF 0402', new_mpn: null, category: 'EE', change_type: 'deleted', description: '优化电路后移除' },
+                ]);
+
+                const getEcnTagType = (changeType) => {
+                    if (changeType === 'added') return 'success';
+                    if (changeType === 'deleted') return 'danger';
+                    if (changeType === 'modified') return 'warning';
+                    return 'info';
+                };
+
+                const getEcnLabel = (changeType) => {
+                    if (changeType === 'added') return '新增';
+                    if (changeType === 'deleted') return '删除';
+                    if (changeType === 'modified') return '变更';
+                    return '未变';
+                };
+
+                const openImportDialog = () => {
+                    importDialogVisible.value = true;
+                };
+
+                const statusOptions = [
+                    { value: 'draft', label: '草稿', type: 'info' },
+                    { value: 'approved', label: '已审批', type: 'primary' },
+                    { value: 'released', label: '已定型', type: 'success' }
+                ];
+
+                const treeProps = {
+                    label: 'name',
+                    isLeaf: (data) => data.type === 'bom_version'
+                };
+
+                const currentProduct = computed(() => {
+                    if (!selectedItem.value) return null;
+                    if (selectedItem.value.type === 'product') return selectedItem.value.data;
+                    if (selectedItem.value.type === 'bom_version') {
+                        return treeData.value.find(p => p.id === selectedItem.value.data.product_id);
+                    }
+                    return null;
+                });
+
+                const formatDate = (dateStr) => {
+                    if (!dateStr) return '-';
+                    return new Date(dateStr).toLocaleDateString('zh-CN');
+                };
+
+                const getDriveImageUrl = (driveId) => driveId ? `https://drive.google.com/uc?id=${driveId}` : '';
+                const getDriveFileUrl = (driveId) => driveId ? `https://drive.google.com/file/d/${driveId}/view` : '';
+
+                const handleImageError = (e) => { e.target.style.display = 'none'; };
+
+                const getStatusTagType = (status) => {
+                    if (status === 'released') return 'success';
+                    if (status === 'approved') return 'primary';
+                    return 'info';
+                };
+
+                const getStatusLabel = (status) => {
+                    if (status === 'released') return '已定型';
+                    if (status === 'approved') return '已审批';
+                    return '草稿';
+                };
+
+                const checkApiStatus = async () => {
+                    try {
+                        const res = await fetch(`${API_BASE}/`);
+                        apiStatus.value = (await res.json()).status === 'ok' ? 'ok' : 'error';
+                    } catch { apiStatus.value = 'error'; }
+                };
+
+                const fetchProducts = async () => {
+                    try {
+                        const res = await fetch(`${API_BASE}/products/`);
+                        treeData.value = await res.json();
+                    } catch (e) {
+                        ElMessage.error('加载产品列表失败');
+                        treeData.value = [];
+                    }
+                };
+
+                const loadBomVersions = async (node, resolve) => {
+                    if (node.data.type === 'bom_version') {
+                        resolve([]);
+                        return;
+                    }
+                    try {
+                        const res = await fetch(`${API_BASE}/products/${node.data.id}/bom-versions`);
+                        const versions = (await res.json()).map(v => ({ ...v, name: v.version_code, type: 'bom_version' }));
+                        resolve(versions);
+                    } catch (e) {
+                        ElMessage.error('加载 BOM 版本失败');
+                        resolve([]);
+                    }
+                };
+
+                const handleNodeClick = async (data) => {
+                    if (data.type === 'bom_version') {
+                        selectedItem.value = { type: 'bom_version', data };
+                        bomItems.value = [];
+                        try {
+                            const res = await fetch(`${API_BASE}/bom/items/?bom_version_id=${data.id}`);
+                            bomItems.value = await res.json();
+                        } catch (e) {
+                            ElMessage.error('加载物料清单失败');
+                        }
+                    } else {
+                        selectedItem.value = { type: 'product', data };
+                        bomItems.value = [];
+                        try {
+                            const res = await fetch(`${API_BASE}/products/${data.id}/documents`);
+                            globalDocuments.value = await res.json();
+                        } catch (e) {
+                            ElMessage.error('加载全局文件失败');
+                        }
+                    }
+                };
+
+                const openEditDialog = (item) => {
+                    dialogMode.value = 'edit';
+                    editForm.value = {
+                        id: item.id,
+                        bom_version_id: item.bom_version_id,
+                        name: item.name || '',
+                        mpn: item.mpn || '',
+                        designator: item.designator || '',
+                        quantity: item.quantity || 1,
+                        category: item.category || '',
+                        responsible: item.responsible || '',
+                        status: item.status || '',
+                        picture_drive_id: item.picture_drive_id || ''
+                    };
+                    editDialogVisible.value = true;
+                };
+
+                const openAddItemDialog = () => {
+                    dialogMode.value = 'create';
+                    editForm.value = {
+                        id: null,
+                        bom_version_id: selectedItem.value?.type === 'bom_version' ? selectedItem.value.data.id : null,
+                        name: '',
+                        mpn: '',
+                        designator: '',
+                        quantity: 1,
+                        category: '',
+                        responsible: '',
+                        status: '',
+                        picture_drive_id: ''
+                    };
+                    editDialogVisible.value = true;
+                };
+
+                const saveItem = async () => {
+                    if (!editForm.value.mpn) {
+                        ElMessage.warning('请输入 MPN');
+                        return;
+                    }
+                    if (!editForm.value.name && dialogMode.value === 'create') {
+                        ElMessage.warning('请输入物料名称');
+                        return;
+                    }
+
+                    try {
+                        let res;
+                        if (dialogMode.value === 'create') {
+                            res = await fetch(`${API_BASE}/bom/items/`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify(editForm.value)
+                            });
+                        } else {
+                            res = await fetch(`${API_BASE}/bom/items/${editForm.value.id}`, {
+                                method: 'PUT',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify(editForm.value)
+                            });
+                        }
+
+                        if (res.ok) {
+                            ElMessage.success(dialogMode.value === 'create' ? '新增成功' : '修改成功');
+                            editDialogVisible.value = false;
+                            if (selectedItem.value?.type === 'bom_version') {
+                                const versionId = selectedItem.value.data.id;
+                                const itemsRes = await fetch(`${API_BASE}/bom/items/?bom_version_id=${versionId}`);
+                                bomItems.value = await itemsRes.json();
+                            }
+                        } else {
+                            ElMessage.error(dialogMode.value === 'create' ? '新增失败' : '修改失败');
+                        }
+                    } catch (e) {
+                        ElMessage.error(dialogMode.value === 'create' ? '新增失败' : '修改失败');
+                    }
+                };
+
+                const openCreateBomVersionDialog = () => {
+                    bomVersionForm.value = {
+                        version_code: '',
+                        change_notes: '',
+                        received_at: '',
+                        created_by: ''
+                    };
+                    bomVersionDialogVisible.value = true;
+                };
+
+                const createBomVersion = async () => {
+                    if (!bomVersionForm.value.version_code) {
+                        ElMessage.warning('请输入版本号');
+                        return;
+                    }
+
+                    try {
+                        const payload = {
+                            product_id: selectedItem.value.data.id,
+                            ...bomVersionForm.value
+                        };
+                        const res = await fetch(`${API_BASE}/bom/versions/`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload)
+                        });
+
+                        if (res.ok) {
+                            ElMessage.success('BOM 版本创建成功');
+                            bomVersionDialogVisible.value = false;
+                            await fetchProducts();
+                        } else {
+                            ElMessage.error('创建失败');
+                        }
+                    } catch (e) {
+                        ElMessage.error('创建失败');
+                    }
+                };
+
+                const openCreateDocumentDialog = () => {
+                    documentForm.value = {
+                        title: '',
+                        document_type: '',
+                        version: '',
+                        google_drive_id: '',
+                        update_notes: ''
+                    };
+                    documentDialogVisible.value = true;
+                };
+
+                const createDocument = async () => {
+                    if (!documentForm.value.title) {
+                        ElMessage.warning('请输入文件标题');
+                        return;
+                    }
+                    if (!documentForm.value.google_drive_id) {
+                        ElMessage.warning('请输入 Google Drive ID');
+                        return;
+                    }
+
+                    try {
+                        const payload = {
+                            product_id: selectedItem.value.data.id,
+                            bom_item_id: null,
+                            ...documentForm.value
+                        };
+                        const res = await fetch(`${API_BASE}/documents/`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload)
+                        });
+
+                        if (res.ok) {
+                            ElMessage.success('文件添加成功');
+                            documentDialogVisible.value = false;
+                            const res2 = await fetch(`${API_BASE}/products/${selectedItem.value.data.id}/documents`);
+                            globalDocuments.value = await res2.json();
+                        } else {
+                            ElMessage.error('添加失败');
+                        }
+                    } catch (e) {
+                        ElMessage.error('添加失败');
+                    }
+                };
+
+                const openImportExcelDialog = () => {
+                    importDialogVisible.value = true;
+                };
+
+                onMounted(() => {
+                    checkApiStatus();
+                    fetchProducts();
+                });
+
+                return {
+                    treeData,
+                    selectedItem,
+                    bomItems,
+                    globalDocuments,
+                    apiStatus,
+                    currentTime,
+                    treeProps,
+                    statusOptions,
+                    currentProduct,
+                    dialogMode,
+                    editDialogVisible,
+                    editForm,
+                    bomVersionDialogVisible,
+                    bomVersionForm,
+                    documentDialogVisible,
+                    documentForm,
+                    importDialogVisible,
+                    activeBomTab,
+                    macroItems,
+                    ecnDemoData,
+                    formatDate,
+                    getDriveImageUrl,
+                    getDriveFileUrl,
+                    handleImageError,
+                    getStatusTagType,
+                    getStatusLabel,
+                    getEcnTagType,
+                    getEcnLabel,
+                    openImportDialog,
+                    loadBomVersions,
+                    handleNodeClick,
+                    openEditDialog,
+                    openAddItemDialog,
+                    saveItem,
+                    openCreateBomVersionDialog,
+                    createBomVersion,
+                    openCreateDocumentDialog,
+                    createDocument,
+                    openImportExcelDialog
+                };
+            }
+        });
+
+        for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
+            app.component(key, component);
+        }
+
+        app.use(ElementPlus).mount('#app');
+    </script>
+</body>
+</html>

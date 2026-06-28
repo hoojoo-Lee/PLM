@@ -1,28 +1,19 @@
 import os
+from dotenv import load_dotenv
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, declarative_base
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
 
-#DATABASE_URL = os.getenv(
-#    "DATABASE_URL",
-#    "postgresql://postgres:postgres@localhost:5432/plm_db"
-#)
-# 绕过环境变量，直接硬编码测试连接
-DATABASE_URL = "postgresql://postgres:admin@localhost:5432/plm_db"
-engine = create_engine(
-    DATABASE_URL,
-    future=True,
-    echo=False,
-)
+# 自动读取同级目录下的 .env 文件
+load_dotenv()
 
-SessionLocal = sessionmaker(
-    bind=engine,
-    autoflush=False,
-    autocommit=False,
-    future=True,
-)
+# 从环境变中获取刚刚填入的云端数据库链接
+DATABASE_URL = os.getenv("DATABASE_URL")
 
+# 建立数据库连接
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
-
 
 def get_db():
     db = SessionLocal()

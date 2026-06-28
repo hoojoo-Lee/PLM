@@ -1,3 +1,11 @@
+"""
+PLM 数据模型 - EMS/ODM 客户项目模式
+业务逻辑：产品 = 客户项目，被动接收客户 BOM，进行版本封存
+"""
+
+from datetime import datetime
+from typing import Optional
+
 from sqlalchemy import (
     BigInteger,
     Column,
@@ -5,137 +13,171 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Integer,
-    Numeric,
     String,
     Text,
+    UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 
 from database import Base
 
 
+# =============================================================================
+# 产品层 (Product) - 客户项目
+# =============================================================================
+
+class Product(Base):
+    """产品主表 - 最高层级，即客户项目"""
+    __tablename__ = "products"
+
+    id = Column(BigInteger, primary_key=True)
+    name = Column(String(200), nullable=False, comment="产品名称/客户项目名称")
+    code = Column(String(50), unique=True, nullable=False, comment="产品编码/项目编号")
+    description = Column(Text, comment="产品描述/项目描述")
+    status = Column(String(20), server_default=text("'active'"), comment="状态: active/inactive")
+    created_at = Column(DateTime(timezone=True), server_default=text("now()"))
+    updated_at = Column(DateTime(timezone=True), server_default=text("now()"), onupdate=datetime.utcnow)
+
+    projects = relationship("Project", back_populates="product", cascade="all, delete-orphan")
+    bom_versions = relationship("BOMVersion", back_populates="product", cascade="all, delete-orphan")
+    documents = relationship("Document", back_populates="product", cascade="all, delete-orphan")
+
+
+# =============================================================================
+# 项目层 (Project) - 内部执行项目
+# =============================================================================
+
 class Project(Base):
-    __tablename__ = "project"
-    __table_args__ = {"comment": "项目主表"}
+    """项目表 - 挂属于 Product，用于内部执行跟踪"""
+    __tablename__ = "projects"
 
     id = Column(BigInteger, primary_key=True)
-    project_code = Column(String, nullable=False, unique=True, comment="项目唯一编码")
-    name = Column(String, nullable=False, comment="项目名称")
+    product_id = Column(BigInteger, ForeignKey("products.id", ondelete="CASCADE"), nullable=False)
+    
+    project_code = Column(String(50), unique=True, nullable=False, comment="内部项目编码")
+    name = Column(String(200), nullable=False, comment="项目名称")
     description = Column(Text, comment="项目描述")
-    status = Column(String, nullable=False, server_default=text("'active'"), comment="项目状态")
-    start_date = Column(Date, comment="项目开始日期")
-    end_date = Column(Date, comment="项目结束日期")
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"), comment="创建时间")
-    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"), comment="更新时间")
+    
+    phase = Column(String(30), server_default=text("'planning'"), comment="阶段: planning/design/prototype/validation/production/eol")
+    status = Column(String(20), server_default=text("'active'"), comment="状态: active/on_hold/completed/cancelled")
+    
+    start_date = Column(Date, comment="开始日期")
+    end_date = Column(Date, comment="结束日期")
+    
+    created_at = Column(DateTime(timezone=True), server_default=text("now()"))
+    updated_at = Column(DateTime(timezone=True), server_default=text("now()"), onupdate=datetime.utcnow)
 
-    issues = relationship("Issue", back_populates="project", cascade="all, delete-orphan")
-    parts = relationship("Part", back_populates="project", cascade="all, delete-orphan")
-    documents = relationship("Document", back_populates="project", cascade="all, delete-orphan")
-    timelines = relationship("Timeline", back_populates="project", cascade="all, delete-orphan")
-    change_logs = relationship("ChangeLog", back_populates="project")
-
-
-class Issue(Base):
-    __tablename__ = "issue"
-    __table_args__ = {"comment": "质量/缺陷追踪表"}
-
-    id = Column(BigInteger, primary_key=True)
-    project_id = Column(BigInteger, ForeignKey("project.id", ondelete="CASCADE"), nullable=False, comment="关联的项目")
-    issue_key = Column(String, nullable=False, comment="项目内 Issue 唯一编号")
-    issue_type = Column(String, nullable=False, comment="缺陷类型")
-    summary = Column(Text, nullable=False, comment="缺陷摘要")
-    description = Column(Text, comment="缺陷描述")
-    status = Column(String, nullable=False, server_default=text("'open'"), comment="缺陷处理状态")
-    priority = Column(String, comment="优先级")
-    reported_by = Column(String, comment="报告者")
-    assigned_to = Column(String, comment="指派人")
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"), comment="创建时间")
-    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"), comment="更新时间")
-
-    project = relationship("Project", back_populates="issues")
-    change_logs = relationship("ChangeLog", back_populates="issue")
+    product = relationship("Product", back_populates="projects")
 
 
-class Part(Base):
-    __tablename__ = "part"
-    __table_args__ = {"comment": "物料主数据表（扁平化管理）"}
+# =============================================================================
+# BOM 版本管理 (BOMVersion)
+# =============================================================================
+
+class BOMVersion(Base):
+    """BOM 版本表 - 挂属于 Product，每次客户提供新 BOM 创建新版本"""
+    __tablename__ = "bom_versions"
+    __table_args__ = (
+        UniqueConstraint("product_id", "version_code", name="uq_bom_version_product_code"),
+    )
 
     id = Column(BigInteger, primary_key=True)
-    project_id = Column(BigInteger, ForeignKey("project.id", ondelete="SET NULL"), comment="关联的项目")
-    part_code = Column(String, nullable=False, unique=True, comment="物料唯一编码")
-    name = Column(String, nullable=False, comment="物料名称")
-    revision = Column(String, comment="物料修订号")
-    category = Column(String, comment="物料分类，例如 EE/ME/PKG")
-    unit = Column(String, comment="计量单位")
-    picture_drive_id = Column(String, comment="预览图片的 Google Drive 文件 ID")
-    status = Column(String, nullable=False, server_default=text("'draft'"), comment="物料定型状态")
-    description = Column(Text, comment="物料描述")
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"), comment="创建时间")
-    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"), comment="更新时间")
+    product_id = Column(BigInteger, ForeignKey("products.id", ondelete="CASCADE"), nullable=False)
+    
+    version_code = Column(String(20), nullable=False, comment="版本号: V1/V2/V1.0/V2.1")
+    status = Column(String(20), server_default=text("'active'"), comment="状态: active/archived")
+    
+    received_at = Column(DateTime(timezone=True), server_default=text("now()"), comment="客户提供 BOM 的时间")
+    change_notes = Column(Text, comment="变更说明/客户备注")
+    
+    created_by = Column(String(100), comment="创建人/接收人")
+    created_at = Column(DateTime(timezone=True), server_default=text("now()"))
 
-    project = relationship("Project", back_populates="parts")
-    documents = relationship("Document", back_populates="part", cascade="all, delete-orphan")
-    change_logs = relationship("ChangeLog", back_populates="part")
+    product = relationship("Product", back_populates="bom_versions")
+    bom_items = relationship("BOMItem", back_populates="bom_version", cascade="all, delete-orphan")
 
 
-class Timeline(Base):
-    __tablename__ = "timeline"
-    __table_args__ = {"comment": "项目进度时间线表"}
+# =============================================================================
+# BOM 物料明细 (BOMItem)
+# =============================================================================
+
+class BOMItem(Base):
+    """BOM 物料明细表 - 强关联 BOM_Version"""
+    __tablename__ = "bom_items"
 
     id = Column(BigInteger, primary_key=True)
-    project_id = Column(BigInteger, ForeignKey("project.id", ondelete="CASCADE"), nullable=False, comment="关联的项目")
-    title = Column(String, nullable=False, comment="节点标题")
-    description = Column(Text, comment="节点描述")
-    due_date = Column(Date, comment="节点预计完成日期")
-    status = Column(String, nullable=False, server_default=text("'pending'"), comment="节点状态")
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"), comment="创建时间")
-    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"), comment="更新时间")
+    bom_version_id = Column(BigInteger, ForeignKey("bom_versions.id", ondelete="CASCADE"), nullable=False)
+    
+    category = Column(String(50), comment="分类: EE/ME/PKG/Chemical")
+    mpn = Column(String(100), comment="物料编号/MPN")
+    name = Column(String(200), nullable=False, comment="物料名称")
+    quantity = Column(Integer, server_default=text("1"), comment="数量")
+    designator = Column(String(100), comment="位号: R1,C2,U3")
+    
+    responsible = Column(String(100), comment="责任人")
+    status = Column(String(20), server_default=text("'pending'"), comment="状态: pending/review/approved/rejected")
+    
+    picture_drive_id = Column(String(100), comment="预览图 Google Drive ID")
+    
+    created_at = Column(DateTime(timezone=True), server_default=text("now()"))
+    updated_at = Column(DateTime(timezone=True), server_default=text("now()"), onupdate=datetime.utcnow)
 
-    project = relationship("Project", back_populates="timelines")
+    bom_version = relationship("BOMVersion", back_populates="bom_items")
+    documents = relationship("Document", back_populates="bom_item", cascade="all, delete-orphan")
 
+
+# =============================================================================
+# 文档管理 (Document) - 双层挂载
+# =============================================================================
 
 class Document(Base):
-    __tablename__ = "document"
-    __table_args__ = {"comment": "图纸/规格书管理表"}
+    """文档表 - 挂载于 Product 或 BOM_Item"""
+    __tablename__ = "documents"
 
     id = Column(BigInteger, primary_key=True)
-    project_id = Column(BigInteger, ForeignKey("project.id", ondelete="SET NULL"), comment="关联的项目")
-    part_id = Column(BigInteger, ForeignKey("part.id", ondelete="SET NULL"), comment="关联的物料")
-    document_type = Column(String, comment="文档类型")
-    title = Column(String, nullable=False, comment="文档标题")
-    google_drive_file_id = Column(String, nullable=False, comment="Google Drive 文件 ID")
-    version = Column(String, nullable=False, server_default=text("'1'"), comment="文档版本")
+    
+    product_id = Column(BigInteger, ForeignKey("products.id", ondelete="CASCADE"), nullable=False)
+    bom_item_id = Column(BigInteger, ForeignKey("bom_items.id", ondelete="SET NULL"), comment="为空则为产品级全局文件")
+    
+    title = Column(String(300), nullable=False, comment="文档标题")
+    document_type = Column(String(50), comment="类型: drawing/spec/test_report/certificate/package/manual")
+    
+    version = Column(String(20), server_default=text("'1'"), comment="版本号")
+    google_drive_id = Column(String(100), nullable=False, comment="Google Drive 文件 ID")
+    
+    file_name = Column(String(255), comment="原始文件名")
+    file_size = Column(BigInteger, comment="文件大小 (bytes)")
+    mime_type = Column(String(100), comment="MIME 类型")
+    
+    status = Column(String(20), server_default=text("'draft'"), comment="draft/review/approved/released")
     update_notes = Column(Text, comment="更新说明")
-    file_name = Column(String, comment="原始文件名")
-    status = Column(String, nullable=False, server_default=text("'draft'"), comment="文档状态")
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"), comment="创建时间")
-    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"), comment="更新时间")
+    
+    created_at = Column(DateTime(timezone=True), server_default=text("now()"))
+    updated_at = Column(DateTime(timezone=True), server_default=text("now()"), onupdate=datetime.utcnow)
 
-    project = relationship("Project", back_populates="documents")
-    part = relationship("Part", back_populates="documents")
-    change_logs = relationship("ChangeLog", back_populates="document")
+    product = relationship("Product", back_populates="documents")
+    bom_item = relationship("BOMItem", back_populates="documents")
 
+
+# =============================================================================
+# 变更日志 (ChangeLog) - 轻量化 ECN
+# =============================================================================
 
 class ChangeLog(Base):
-    __tablename__ = "change_log"
-    __table_args__ = {"comment": "变更流水表，用于自动记录实体增删改差异"}
+    """变更日志 - 记录所有操作"""
+    __tablename__ = "change_logs"
 
     id = Column(BigInteger, primary_key=True)
-    project_id = Column(BigInteger, ForeignKey("project.id", ondelete="SET NULL"), comment="关联的项目")
-    issue_id = Column(BigInteger, ForeignKey("issue.id", ondelete="SET NULL"), comment="关联的 Issue")
-    part_id = Column(BigInteger, ForeignKey("part.id", ondelete="SET NULL"), comment="关联的物料")
-    document_id = Column(BigInteger, ForeignKey("document.id", ondelete="SET NULL"), comment="关联的文档")
-    entity_type = Column(String, nullable=False, comment="变更实体类型")
-    entity_key = Column(String, comment="实体唯一标识")
-    change_type = Column(String, nullable=False, comment="变更类型（create/update/delete）")
-    diff = Column(JSONB, nullable=False, comment="存储变更前后差异的 JSONB 数据")
-    comment = Column(Text, comment="变更说明")
-    changed_by = Column(String, comment="变更用户")
-    changed_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"), comment="变更时间")
-
-    project = relationship("Project", back_populates="change_logs")
-    issue = relationship("Issue", back_populates="change_logs")
-    part = relationship("Part", back_populates="change_logs")
-    document = relationship("Document", back_populates="change_logs")
+    
+    entity_type = Column(String(30), nullable=False, comment="实体类型: Product/BOM/Doc")
+    entity_id = Column(BigInteger, nullable=False, comment="实体主键")
+    entity_name = Column(String(200), comment="实体名称")
+    
+    change_type = Column(String(20), nullable=False, comment="变更类型: create/update/delete/archive")
+    change_summary = Column(Text, nullable=False, comment="变更说明")
+    change_detail = Column(String(1000), comment="变更详情")
+    
+    changed_by = Column(String(100), comment="变更人")
+    
+    created_at = Column(DateTime(timezone=True), server_default=text("now()"))
