@@ -7,7 +7,9 @@ from database import get_db
 import models
 from schemas import (
     BOMVersionBrief,
-    DocumentBrief,
+    BOMVersionCreate,
+    BOMVersionResponse,
+    DocumentResponse,
     ProductCreate,
     ProductResponse,
     ProductUpdate,
@@ -101,7 +103,30 @@ def get_product_bom_versions(product_id: int, db: Session = Depends(get_db)):
     return versions
 
 
-@router.get("/{product_id}/documents", response_model=List[DocumentBrief])
+@router.post("/{product_id}/bom-versions", response_model=BOMVersionResponse, status_code=status.HTTP_201_CREATED)
+def create_bom_version(product_id: int, payload: BOMVersionCreate, db: Session = Depends(get_db)):
+    product = db.query(models.Product).get(product_id)
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    existing = db.query(models.BOMVersion).filter(
+        models.BOMVersion.product_id == product_id,
+        models.BOMVersion.version_code == payload.version_code
+    ).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Version code already exists for this product")
+    bom_version = models.BOMVersion(
+        product_id=product_id,
+        version_code=payload.version_code,
+        status="active",
+        change_notes=payload.change_notes,
+    )
+    db.add(bom_version)
+    db.commit()
+    db.refresh(bom_version)
+    return bom_version
+
+
+@router.get("/{product_id}/documents", response_model=List[DocumentResponse])
 def get_product_global_documents(product_id: int, db: Session = Depends(get_db)):
     product = db.query(models.Product).get(product_id)
     if not product:

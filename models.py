@@ -110,6 +110,7 @@ class BOMItem(Base):
     bom_version_id = Column(BigInteger, ForeignKey("bom_versions.id", ondelete="CASCADE"), nullable=False)
     
     category = Column(String(50), comment="分类: EE/ME/PKG/Chemical")
+    sub_module = Column(String(50), nullable=True, default='', comment="所属板卡/模块: 主板/电源板/显示板")
     mpn = Column(String(100), comment="物料编号/MPN")
     name = Column(String(200), nullable=False, comment="物料名称")
     quantity = Column(Integer, server_default=text("1"), comment="数量")
@@ -144,6 +145,7 @@ class Document(Base):
     document_type = Column(String(50), comment="类型: drawing/spec/test_report/certificate/package/manual")
     
     version = Column(String(20), server_default=text("'1'"), comment="版本号")
+    received_date = Column(Date, server_default=text("CURRENT_DATE"), comment="客户下发/输入日期")
     google_drive_id = Column(String(100), nullable=False, comment="Google Drive 文件 ID")
     
     file_name = Column(String(255), comment="原始文件名")

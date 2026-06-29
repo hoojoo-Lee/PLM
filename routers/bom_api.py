@@ -1,6 +1,6 @@
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, status, UploadFile
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -152,6 +152,7 @@ def create_bom_item(payload: BOMItemCreate, db: Session = Depends(get_db)):
     bom_item = models.BOMItem(
         bom_version_id=payload.bom_version_id,
         category=payload.category,
+        sub_module=payload.sub_module or '',
         mpn=payload.mpn,
         name=payload.name,
         quantity=payload.quantity,
@@ -195,6 +196,8 @@ def update_bom_item(item_id: int, payload: BOMItemUpdate, db: Session = Depends(
         item.bom_version_id = payload.bom_version_id
     if payload.category is not None:
         item.category = payload.category
+    if payload.sub_module is not None:
+        item.sub_module = payload.sub_module
     if payload.mpn is not None:
         item.mpn = payload.mpn
     if payload.name is not None:
@@ -253,3 +256,115 @@ def create_bom_items_batch(bom_version_id: int, items: List[BOMItemCreate], db: 
         db.refresh(item)
     
     return created_items
+
+
+@router.post("/import/{bom_version_id}", response_model=dict, status_code=status.HTTP_201_CREATED)
+def import_bom_from_excel(bom_version_id: int, file: UploadFile = File(...), db: Session = Depends(get_db)):
+    bom_version = db.query(models.BOMVersion).get(bom_version_id)
+    if not bom_version:
+        raise HTTPException(status_code=404, detail="BOMVersion not found")
+    
+    allowed_extensions = ['.xlsx', '.xls', '.csv']
+    filename = file.filename.lower()
+    if not any(filename.endswith(ext) for ext in allowed_extensions):
+        raise HTTPException(status_code=400, detail="Only Excel (.xlsx, .xls) or CSV files are allowed")
+    
+    try:
+        if filename.endswith('.csv'):
+            import csv
+            content = file.file.read().decode('utf-8').strip()
+            lines = content.split('\n')
+            reader = csv.DictReader(lines)
+            rows = list(reader)
+        else:
+            from io import BytesIO
+            import openpyxl
+            wb = openpyxl.load_workbook(BytesIO(file.file.read()), data_only=True)
+            ws = wb.active
+            headers = [cell.value for cell in ws[1]]
+            rows = []
+            for row in ws.iter_rows(min_row=2, values_only=True):
+                if all(cell is None for cell in row):
+                    continue
+                rows.append(dict(zip(headers, row)))
+        
+        column_mapping = {
+            'mpn': ['mpn', '料号', '物料编号', 'part number', 'pn', '编号'],
+            'name': ['name', '物料名称', '名称', '品名', 'description', '描述'],
+            'quantity': ['quantity', '数量', '用量', 'qty'],
+            'designator': ['designator', '位号', '位置', 'ref', '参考'],
+            'category': ['category', '分类', '类别', '类型'],
+            'sub_module': ['sub_module', '模块', '板卡', '所属板卡', '所属模块'],
+            'responsible': ['responsible', '负责人', '责任人'],
+            'status': ['status', '状态'],
+        }
+        
+        def find_column(header, candidates):
+            if not header:
+                return None
+            h = str(header).strip().lower()
+            for candidate in candidates:
+                if candidate.lower() in h or h in candidate.lower():
+                    return h
+            return None
+        
+        col_indices = {}
+        if rows:
+            first_row = rows[0]
+            for key, candidates in column_mapping.items():
+                for header in first_row.keys():
+                    if find_column(header, candidates):
+                        col_indices[key] = header
+                        break
+        
+        created_count = 0
+        skipped_count = 0
+        
+        for row in rows:
+            mpn = str(row.get(col_indices.get('mpn'))).strip() if col_indices.get('mpn') else ''
+            name = str(row.get(col_indices.get('name'))).strip() if col_indices.get('name') else ''
+            
+            if not mpn and not name:
+                skipped_count += 1
+                continue
+            
+            quantity = row.get(col_indices.get('quantity'))
+            try:
+                quantity = int(quantity) if quantity else 1
+            except ValueError:
+                quantity = 1
+            
+            designator = str(row.get(col_indices.get('designator'))).strip() if col_indices.get('designator') else ''
+            category = str(row.get(col_indices.get('category'))).strip() if col_indices.get('category') else ''
+            sub_module = str(row.get(col_indices.get('sub_module'))).strip() if col_indices.get('sub_module') else ''
+            responsible = str(row.get(col_indices.get('responsible'))).strip() if col_indices.get('responsible') else ''
+            status = str(row.get(col_indices.get('status'))).strip() if col_indices.get('status') else 'pending'
+            
+            if not name:
+                name = mpn
+            
+            bom_item = models.BOMItem(
+                bom_version_id=bom_version_id,
+                category=category,
+                sub_module=sub_module,
+                mpn=mpn,
+                name=name,
+                quantity=quantity,
+                designator=designator,
+                responsible=responsible,
+                status=status,
+            )
+            db.add(bom_item)
+            created_count += 1
+        
+        db.commit()
+        
+        return {
+            'message': f'BOM 导入成功',
+            'created_count': created_count,
+            'skipped_count': skipped_count,
+            'column_mapping': col_indices,
+        }
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"导入失败: {str(e)}")

@@ -154,14 +154,33 @@
                                 <el-col :xs="24" :sm="12" :lg="8" v-for="doc in globalDocuments" :key="doc.id">
                                     <el-card shadow="hover" class="bg-gradient-to-br from-blue-50 to-blue-100">
                                         <div class="flex items-start justify-between mb-2">
-                                            <span class="font-semibold">{{ doc.title }}</span>
+                                            <div class="flex items-center space-x-2">
+                                                <span class="font-semibold">{{ doc.title }}</span>
+                                                <el-button size="small" @click="openEditDocumentDialog(doc)" class="text-gray-400 hover:text-gray-600 p-1">
+                                                    <el-icon><Edit class="w-3 h-3" /></el-icon>
+                                                </el-button>
+                                            </div>
                                             <el-tag size="small" type="primary">v{{ doc.version }}</el-tag>
                                         </div>
+                                        <div class="flex items-center space-x-2 mb-2">
+                                            <el-icon class="w-3 h-3 text-gray-400"><Calendar /></el-icon>
+                                            <span class="text-xs text-gray-500">{{ formatDate(doc.received_date) }}</span>
+                                        </div>
                                         <p v-if="doc.update_notes" class="text-xs text-gray-500 mb-3">{{ doc.update_notes }}</p>
-                                        <a :href="getDriveFileUrl(doc.google_drive_id)" target="_blank" class="text-xs text-blue-600 flex items-center">
-                                            <el-icon><ExternalLink class="w-3 h-3 mr-1" /></el-icon>
-                                            查看文件
-                                        </a>
+                                        <div class="flex space-x-2">
+                                            <el-button size="small" @click="previewDocument(doc)" class="text-xs">
+                                                <el-icon><View class="w-3 h-3 mr-1" /></el-icon>
+                                                预览
+                                            </el-button>
+                                            <el-button size="small" type="primary" @click="openUpdateDocumentDialog(doc)" class="text-xs">
+                                                <el-icon><Refresh class="w-3 h-3 mr-1" /></el-icon>
+                                                更新版本
+                                            </el-button>
+                                            <el-button size="small" type="danger" @click="confirmDeleteDocument(doc)" class="text-xs">
+                                                <el-icon><Delete class="w-3 h-3 mr-1" /></el-icon>
+                                                删除
+                                            </el-button>
+                                        </div>
                                     </el-card>
                                 </el-col>
                             </el-row>
@@ -217,6 +236,13 @@
                                                 <p class="text-xs text-blue-600 mt-1">适用于 Turnkey 项目经理快速把控全局，不展示底层电容电阻等微细节。</p>
                                             </div>
                                         </div>
+                                    </div>
+                                    <div class="mb-4 flex items-center space-x-4">
+                                        <span class="text-sm font-medium text-gray-600">模块筛选：</span>
+                                        <el-radio-group v-model="selectedSubModule" size="small">
+                                            <el-radio :value="''">全部</el-radio>
+                                            <el-radio v-for="module in subModuleOptions" :key="module" :value="module">{{ module }}</el-radio>
+                                        </el-radio-group>
                                     </div>
                                     <div v-if="macroItems.length === 0" class="border-2 border-dashed border-gray-300 rounded-lg p-12 flex flex-col items-center justify-center add-card-hover transition-all duration-200 cursor-pointer" @click="openAddItemDialog">
                                         <el-icon class="w-16 h-16 text-gray-400 mb-4"><Plus /></el-icon>
@@ -363,6 +389,11 @@
                         <el-option label="Chemical 化学品" value="Chemical" />
                     </el-select>
                 </el-form-item>
+                <el-form-item label="所属板卡/模块">
+                    <el-select v-model="editForm.sub_module" placeholder="选择或输入模块名称" filterable allow-create>
+                        <el-option v-for="module in subModuleOptions" :key="module" :label="module" :value="module" />
+                    </el-select>
+                </el-form-item>
                 <el-form-item label="负责人">
                     <el-input v-model="editForm.responsible" placeholder="输入负责人姓名" />
                 </el-form-item>
@@ -392,16 +423,10 @@
         <el-dialog v-model="bomVersionDialogVisible" title="创建新 BOM 版本" width="500px">
             <el-form :model="bomVersionForm" label-width="100px">
                 <el-form-item label="版本号" required>
-                    <el-input v-model="bomVersionForm.version_code" placeholder="输入版本号（如：V2.0, V3.1_Beta）" />
+                    <el-input v-model="bomVersionForm.version_code" placeholder="如：V1.0 (20260629_Alpha)" />
                 </el-form-item>
-                <el-form-item label="变更说明">
-                    <el-input type="textarea" v-model="bomVersionForm.change_notes" placeholder="描述本次 BOM 变更的主要内容（如：客户升级了 MCU）" />
-                </el-form-item>
-                <el-form-item label="接收时间">
-                    <el-date-picker v-model="bomVersionForm.received_at" type="datetime" placeholder="选择客户提供 BOM 的时间" />
-                </el-form-item>
-                <el-form-item label="接收人">
-                    <el-input v-model="bomVersionForm.created_by" placeholder="输入接收人姓名" />
+                <el-form-item label="变更备注">
+                    <el-input type="textarea" v-model="bomVersionForm.change_notes" placeholder="描述本次客户交付BOM的初始状态或变更核心点" />
                 </el-form-item>
             </el-form>
             <template #footer>
@@ -416,17 +441,15 @@
                     <el-input v-model="documentForm.title" placeholder="输入文件标题（如：产品测试规范书）" />
                 </el-form-item>
                 <el-form-item label="文件类型">
-                    <el-select v-model="documentForm.document_type" placeholder="选择文件类型">
-                        <el-option label="图纸 (Drawing)" value="drawing" />
-                        <el-option label="规格书 (Spec)" value="spec" />
-                        <el-option label="测试报告 (Test Report)" value="test_report" />
-                        <el-option label="认证证书 (Certificate)" value="certificate" />
-                        <el-option label="包装规范 (Package)" value="package" />
-                        <el-option label="操作手册 (Manual)" value="manual" />
+                    <el-select v-model="documentForm.document_type" placeholder="请选择文件类型">
+                        <el-option v-for="opt in documentTypeOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
                     </el-select>
                 </el-form-item>
                 <el-form-item label="版本号">
                     <el-input v-model="documentForm.version" placeholder="输入版本号（如：1.0, V2.0）" />
+                </el-form-item>
+                <el-form-item label="输入日期">
+                    <el-date-picker v-model="documentForm.received_date" type="date" placeholder="选择客户发件日期" value-format="YYYY-MM-DD" />
                 </el-form-item>
                 <el-form-item label="Drive ID" required>
                     <el-input v-model="documentForm.google_drive_id" placeholder="在此粘贴 Google Drive 文件的共享 ID" />
@@ -441,29 +464,92 @@
             </template>
         </el-dialog>
 
-        <el-dialog v-model="importDialogVisible" title="导入客户 Excel BOM" width="600px">
-            <div class="flex flex-col items-center justify-center py-8">
-                <el-icon class="w-16 h-16 text-gray-400 mb-4"><Upload /></el-icon>
-                <p class="text-gray-500 text-center mb-6">暂未实现 Excel 批量导入功能，请先使用"创建新 BOM 版本" + "手动录入新物料"的方式录入数据。</p>
-                <div class="bg-gray-50 rounded-lg p-4 w-full">
-                    <p class="text-sm font-medium text-gray-700 mb-2">推荐数据录入流程：</p>
-                    <ol class="text-xs text-gray-500 space-y-1">
-                        <li>1. 在产品主页点击"创建新 BOM 版本"</li>
-                        <li>2. 输入版本号和变更说明</li>
-                        <li>3. 进入版本详情页，点击"手动录入新物料"</li>
-                        <li>4. 填写 MPN、位号、用量等信息</li>
-                    </ol>
-                </div>
+        <el-dialog v-model="previewDialogVisible" title="文档预览" width="900px" height="70vh">
+            <div class="w-full h-[50vh] bg-gray-100 rounded-lg overflow-hidden mb-4">
+                <iframe :src="previewUrl" class="w-full h-full" frameborder="0"></iframe>
+            </div>
+            <div class="text-xs text-gray-500 mb-4 bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                提示：如果预览失败或白屏，请确保 Google Drive 文件已设置为"知道链接的任何人可见"，或点击下方按钮在新标签页中查看。
             </div>
             <template #footer>
-                <el-button type="primary" @click="importDialogVisible = false">我知道了</el-button>
+                <el-button @click="previewDialogVisible = false">关闭</el-button>
+                <el-button type="primary" @click="openPreviewInNewTab">
+                    在新标签页中打开 / Open in New Tab
+                </el-button>
+            </template>
+        </el-dialog>
+
+        <el-dialog v-model="updateDocumentDialogVisible" title="更新文档版本" width="500px">
+            <el-form :model="updateDocumentForm" label-width="100px">
+                <el-form-item label="当前版本">
+                    <el-tag type="info">v{{ updateDocumentForm.current_version }}</el-tag>
+                </el-form-item>
+                <el-form-item label="新 Drive ID" required>
+                    <el-input v-model="updateDocumentForm.google_drive_id" placeholder="粘贴新的 Google Drive 文件 ID" />
+                </el-form-item>
+                <el-form-item label="更新说明">
+                    <el-input type="textarea" v-model="updateDocumentForm.update_notes" placeholder="描述本次更新的内容" />
+                </el-form-item>
+            </el-form>
+            <template #footer>
+                <el-button @click="updateDocumentDialogVisible = false">取消</el-button>
+                <el-button type="primary" @click="updateDocument">保存更新</el-button>
+            </template>
+        </el-dialog>
+
+        <el-dialog v-model="editDocumentDialogVisible" title="编辑文件信息" width="450px">
+            <el-form :model="editDocumentForm" label-width="100px">
+                <el-form-item label="文件名称" required>
+                    <el-input v-model="editDocumentForm.title" placeholder="输入文件名称" />
+                </el-form-item>
+                <el-form-item label="版本号" required>
+                    <el-input v-model="editDocumentForm.version" placeholder="输入版本号" />
+                </el-form-item>
+                <el-form-item label="更新说明">
+                    <el-input type="textarea" v-model="editDocumentForm.update_notes" placeholder="描述本次修改的内容" />
+                </el-form-item>
+            </el-form>
+            <template #footer>
+                <el-button @click="editDocumentDialogVisible = false">取消</el-button>
+                <el-button type="primary" @click="saveDocumentInfo">保存修改</el-button>
+            </template>
+        </el-dialog>
+
+        <el-dialog v-model="importDialogVisible" title="导入客户 Excel BOM" width="600px">
+            <div class="py-4">
+                <div class="bg-gray-50 rounded-lg p-4 mb-4">
+                    <p class="text-sm font-medium text-gray-700 mb-2">支持的文件格式：</p>
+                    <ul class="text-xs text-gray-500 space-y-1">
+                        <li>• Excel (.xlsx, .xls)</li>
+                        <li>• CSV (.csv)</li>
+                    </ul>
+                    <p class="text-xs text-gray-500 mt-2">系统会自动识别列名（MPN、物料名称、数量、位号、分类、模块等）</p>
+                </div>
+                <el-upload
+                    class="upload-demo"
+                    drag
+                    :action="importUrl"
+                    :headers="{ 'Content-Type': 'multipart/form-data' }"
+                    :on-success="handleImportSuccess"
+                    :on-error="handleImportError"
+                    :before-upload="beforeImportUpload"
+                    accept=".xlsx,.xls,.csv"
+                    :auto-upload="true"
+                >
+                    <el-icon class="w-16 h-16 text-gray-400 mb-4"><Upload /></el-icon>
+                    <div class="text-sm text-gray-500">拖拽文件到此处，或<em>点击上传</em></div>
+                    <div class="text-xs text-gray-400 mt-2">仅支持 .xlsx, .xls, .csv 格式</div>
+                </el-upload>
+            </div>
+            <template #footer>
+                <el-button @click="importDialogVisible = false">取消</el-button>
             </template>
         </el-dialog>
     </div>
 
     <script>
         const { createApp, ref, computed, onMounted } = Vue;
-        const { ElMessage } = ElementPlus;
+        const { ElMessage, ElMessageBox } = ElementPlus;
 
         const API_BASE = 'http://127.0.0.1:8080';
 
@@ -487,6 +573,7 @@
                     designator: '',
                     quantity: 1,
                     category: '',
+                    sub_module: '',
                     responsible: '',
                     status: '',
                     picture_drive_id: ''
@@ -495,27 +582,125 @@
                 const bomVersionDialogVisible = ref(false);
                 const bomVersionForm = ref({
                     version_code: '',
-                    change_notes: '',
-                    received_at: '',
-                    created_by: ''
+                    change_notes: ''
                 });
 
                 const documentDialogVisible = ref(false);
                 const documentForm = ref({
                     title: '',
-                    document_type: '',
+                    document_type: null,
                     version: '',
+                    received_date: new Date().toISOString().slice(0, 10),
                     google_drive_id: '',
                     update_notes: ''
                 });
 
+                const documentTypeOptions = [
+                    { label: 'Design File (设计文件)', value: 'design_file' },
+                    { label: 'Specification (规格书)', value: 'specification' },
+                    { label: 'Gerber (制板文件)', value: 'gerber' },
+                    { label: 'PRD (需求文档)', value: 'prd' },
+                    { label: 'SOP (作业指导书)', value: 'sop' },
+                    { label: 'Test Report (测试报告)', value: 'test_report' },
+                    { label: 'Other (其他)', value: 'other' }
+                ];
+
                 const importDialogVisible = ref(false);
 
+                const previewDialogVisible = ref(false);
+                const previewUrl = ref('');
+                const previewViewUrl = ref('');
+                
+                const updateDocumentDialogVisible = ref(false);
+                const updateDocumentForm = ref({
+                    id: null,
+                    current_version: '',
+                    google_drive_id: '',
+                    update_notes: ''
+                });
+
+                const editDocumentDialogVisible = ref(false);
+                const editDocumentForm = ref({
+                    id: null,
+                    title: '',
+                    version: '',
+                    update_notes: ''
+                });
+
+                const importUrl = computed(() => {
+                    if (selectedItem.value?.type === 'bom_version') {
+                        return `${API_BASE}/bom/import/${selectedItem.value.data.id}`;
+                    }
+                    return '';
+                });
+
+                const beforeImportUpload = (file) => {
+                    const ext = file.name.split('.').pop().toLowerCase();
+                    if (!['xlsx', 'xls', 'csv'].includes(ext)) {
+                        ElMessage.error('仅支持 .xlsx, .xls, .csv 格式');
+                        return false;
+                    }
+                    if (!selectedItem.value?.type === 'bom_version') {
+                        ElMessage.error('请先选择一个 BOM 版本');
+                        return false;
+                    }
+                    return true;
+                };
+
+                const handleImportSuccess = async (response) => {
+                    ElMessage.success(`${response.message}，成功导入 ${response.created_count} 条记录`);
+                    importDialogVisible.value = false;
+                    if (selectedItem.value?.type === 'bom_version') {
+                        try {
+                            const res = await fetch(`${API_BASE}/bom/items/?bom_version_id=${selectedItem.value.data.id}`);
+                            bomItems.value = await res.json();
+                        } catch (e) {
+                            ElMessage.error('刷新物料列表失败');
+                        }
+                    }
+                };
+
+                const handleImportError = (err) => {
+                    let message = '导入失败';
+                    try {
+                        const response = err.response;
+                        if (response && response.data) {
+                            message = response.data.detail || JSON.stringify(response.data);
+                        }
+                    } catch (e) {
+                        message = err.message || '导入失败';
+                    }
+                    ElMessage.error(message);
+                };
+
+                const extractDriveId = (input) => {
+                    if (!input) return '';
+                    const trimmed = input.trim();
+                    const fileDRegex = /\/file\/d\/([-\w]+)/;
+                    const openIdRegex = /\/open\?id=([-\w]+)/;
+                    const queryIdRegex = /[?&]id=([-\w]+)/;
+                    const match = trimmed.match(fileDRegex) || trimmed.match(openIdRegex) || trimmed.match(queryIdRegex);
+                    if (match) return match[1];
+                    const longMatch = trimmed.match(/[-\w]{25,}/);
+                    if (longMatch) return longMatch[0];
+                    return trimmed;
+                };
+
                 const activeBomTab = ref('macro');
+                const selectedSubModule = ref('');
+
+                const subModuleOptions = computed(() => {
+                    const modules = [...new Set(bomItems.value.map(item => item.sub_module).filter(m => m && m.trim()))];
+                    return modules.sort();
+                });
 
                 const macroItems = computed(() => {
                     const macroCategories = ['ME', 'PKG', 'Assembly', 'Module'];
-                    return bomItems.value.filter(item => macroCategories.includes(item.category) || (item.category === 'EE' && item.mpn && item.mpn.length > 15));
+                    return bomItems.value.filter(item => {
+                        const categoryMatch = macroCategories.includes(item.category) || (item.category === 'EE' && item.mpn && item.mpn.length > 15);
+                        const moduleMatch = !selectedSubModule.value || !item.sub_module || item.sub_module === selectedSubModule.value;
+                        return categoryMatch && moduleMatch;
+                    });
                 });
 
                 const ecnDemoData = ref([
@@ -569,8 +754,14 @@
                     return new Date(dateStr).toLocaleDateString('zh-CN');
                 };
 
-                const getDriveImageUrl = (driveId) => driveId ? `https://drive.google.com/uc?id=${driveId}` : '';
-                const getDriveFileUrl = (driveId) => driveId ? `https://drive.google.com/file/d/${driveId}/view` : '';
+                const getDriveImageUrl = (driveId) => {
+                    const cleanId = extractDriveId(driveId);
+                    return cleanId ? `https://drive.google.com/uc?id=${cleanId}` : '';
+                };
+                const getDriveFileUrl = (driveId) => {
+                    const cleanId = extractDriveId(driveId);
+                    return cleanId ? `https://drive.google.com/file/d/${cleanId}/view` : '';
+                };
 
                 const handleImageError = (e) => { e.target.style.display = 'none'; };
 
@@ -650,6 +841,7 @@
                         designator: item.designator || '',
                         quantity: item.quantity || 1,
                         category: item.category || '',
+                        sub_module: item.sub_module || '',
                         responsible: item.responsible || '',
                         status: item.status || '',
                         picture_drive_id: item.picture_drive_id || ''
@@ -667,6 +859,7 @@
                         designator: '',
                         quantity: 1,
                         category: '',
+                        sub_module: '',
                         responsible: '',
                         status: '',
                         picture_drive_id: ''
@@ -719,9 +912,7 @@
                 const openCreateBomVersionDialog = () => {
                     bomVersionForm.value = {
                         version_code: '',
-                        change_notes: '',
-                        received_at: '',
-                        created_by: ''
+                        change_notes: ''
                     };
                     bomVersionDialogVisible.value = true;
                 };
@@ -731,13 +922,17 @@
                         ElMessage.warning('请输入版本号');
                         return;
                     }
+                    if (!selectedItem.value || !selectedItem.value.data.id) {
+                        ElMessage.warning('请先选择一个产品');
+                        return;
+                    }
 
                     try {
                         const payload = {
-                            product_id: selectedItem.value.data.id,
-                            ...bomVersionForm.value
+                            version_code: bomVersionForm.value.version_code,
+                            change_notes: bomVersionForm.value.change_notes
                         };
-                        const res = await fetch(`${API_BASE}/bom/versions/`, {
+                        const res = await fetch(`${API_BASE}/products/${selectedItem.value.data.id}/bom-versions`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify(payload)
@@ -748,7 +943,8 @@
                             bomVersionDialogVisible.value = false;
                             await fetchProducts();
                         } else {
-                            ElMessage.error('创建失败');
+                            const err = await res.json();
+                            ElMessage.error(err.detail || '创建失败');
                         }
                     } catch (e) {
                         ElMessage.error('创建失败');
@@ -758,8 +954,9 @@
                 const openCreateDocumentDialog = () => {
                     documentForm.value = {
                         title: '',
-                        document_type: '',
+                        document_type: null,
                         version: '',
+                        received_date: new Date().toISOString().slice(0, 10),
                         google_drive_id: '',
                         update_notes: ''
                     };
@@ -780,7 +977,8 @@
                         const payload = {
                             product_id: selectedItem.value.data.id,
                             bom_item_id: null,
-                            ...documentForm.value
+                            ...documentForm.value,
+                            google_drive_id: extractDriveId(documentForm.value.google_drive_id)
                         };
                         const res = await fetch(`${API_BASE}/documents/`, {
                             method: 'POST',
@@ -789,16 +987,143 @@
                         });
 
                         if (res.ok) {
-                            ElMessage.success('文件添加成功');
-                            documentDialogVisible.value = false;
+                        ElMessage.success('文件添加成功');
+                        documentDialogVisible.value = false;
+                        const res2 = await fetch(`${API_BASE}/products/${selectedItem.value.data.id}/documents`);
+                        globalDocuments.value = await res2.json();
+                    } else {
+                        const err = await res.json().catch(() => ({ detail: '添加失败' }));
+                        ElMessage.error(err.detail || JSON.stringify(err));
+                    }
+                } catch (e) {
+                    ElMessage.error('网络错误：' + e.message);
+                }
+                };
+
+                const previewDocument = (doc) => {
+                    const driveId = extractDriveId(doc.google_drive_id);
+                    previewUrl.value = `https://drive.google.com/file/d/${driveId}/preview`;
+                    previewViewUrl.value = `https://drive.google.com/file/d/${driveId}/view`;
+                    previewDialogVisible.value = true;
+                };
+
+                const openPreviewInNewTab = () => {
+                    window.open(previewViewUrl.value, '_blank');
+                };
+
+                const openUpdateDocumentDialog = (doc) => {
+                    updateDocumentForm.value = {
+                        id: doc.id,
+                        current_version: doc.version,
+                        google_drive_id: doc.google_drive_id,
+                        update_notes: ''
+                    };
+                    updateDocumentDialogVisible.value = true;
+                };
+
+                const updateDocument = async () => {
+                    if (!updateDocumentForm.value.google_drive_id) {
+                        ElMessage.warning('请输入新的 Google Drive ID');
+                        return;
+                    }
+
+                    try {
+                        const payload = {
+                            google_drive_id: extractDriveId(updateDocumentForm.value.google_drive_id),
+                            update_notes: updateDocumentForm.value.update_notes
+                        };
+                        const res = await fetch(`${API_BASE}/documents/${updateDocumentForm.value.id}`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload)
+                        });
+
+                        if (res.ok) {
+                            ElMessage.success('文件更新成功');
+                            updateDocumentDialogVisible.value = false;
                             const res2 = await fetch(`${API_BASE}/products/${selectedItem.value.data.id}/documents`);
                             globalDocuments.value = await res2.json();
                         } else {
-                            ElMessage.error('添加失败');
+                            const err = await res.json().catch(() => ({ detail: '更新失败' }));
+                            ElMessage.error(err.detail || JSON.stringify(err));
                         }
                     } catch (e) {
-                        ElMessage.error('添加失败');
+                        ElMessage.error('网络错误：' + e.message);
                     }
+                };
+
+                const openEditDocumentDialog = (doc) => {
+                    editDocumentForm.value = {
+                        id: doc.id,
+                        title: doc.title,
+                        version: doc.version,
+                        update_notes: doc.update_notes || ''
+                    };
+                    editDocumentDialogVisible.value = true;
+                };
+
+                const saveDocumentInfo = async () => {
+                    if (!editDocumentForm.value.title) {
+                        ElMessage.warning('请输入文件名称');
+                        return;
+                    }
+                    if (!editDocumentForm.value.version) {
+                        ElMessage.warning('请输入版本号');
+                        return;
+                    }
+                    try {
+                        const payload = {
+                            title: editDocumentForm.value.title,
+                            version: editDocumentForm.value.version,
+                            update_notes: editDocumentForm.value.update_notes
+                        };
+                        const res = await fetch(`${API_BASE}/documents/${editDocumentForm.value.id}`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload)
+                        });
+
+                        if (res.ok) {
+                            ElMessage.success('文件信息更新成功');
+                            editDocumentDialogVisible.value = false;
+                            const res2 = await fetch(`${API_BASE}/products/${selectedItem.value.data.id}/documents`);
+                            globalDocuments.value = await res2.json();
+                        } else {
+                            const err = await res.json().catch(() => ({ detail: '更新失败' }));
+                            ElMessage.error(err.detail || JSON.stringify(err));
+                        }
+                    } catch (e) {
+                        ElMessage.error('网络错误：' + e.message);
+                    }
+                };
+
+                const deleteDocument = async (doc) => {
+                    try {
+                        const res = await fetch(`${API_BASE}/documents/${doc.id}`, {
+                            method: 'DELETE'
+                        });
+
+                        if (res.ok) {
+                            ElMessage.success('文件删除成功');
+                            const res2 = await fetch(`${API_BASE}/products/${selectedItem.value.data.id}/documents`);
+                            globalDocuments.value = await res2.json();
+                        } else {
+                            const err = await res.json().catch(() => ({ detail: '删除失败' }));
+                            ElMessage.error(err.detail || JSON.stringify(err));
+                        }
+                    } catch (e) {
+                        ElMessage.error('网络错误：' + e.message);
+                    }
+                };
+
+                const confirmDeleteDocument = (doc) => {
+                    ElMessageBox.confirm('确定要删除此文件吗？此操作不可恢复。', '删除确认', {
+                        confirmButtonText: '确定删除',
+                        cancelButtonText: '取消',
+                        type: 'warning',
+                    }).then(() => {
+                        deleteDocument(doc);
+                    }).catch(() => {});
                 };
 
                 const openImportExcelDialog = () => {
@@ -827,8 +1152,15 @@
                     bomVersionForm,
                     documentDialogVisible,
                     documentForm,
+                    documentTypeOptions,
                     importDialogVisible,
+                    importUrl,
+                    beforeImportUpload,
+                    handleImportSuccess,
+                    handleImportError,
                     activeBomTab,
+                    selectedSubModule,
+                    subModuleOptions,
                     macroItems,
                     ecnDemoData,
                     formatDate,
@@ -849,6 +1181,21 @@
                     createBomVersion,
                     openCreateDocumentDialog,
                     createDocument,
+                    previewDialogVisible,
+                    previewUrl,
+                    previewViewUrl,
+                    previewDocument,
+                    openPreviewInNewTab,
+                    extractDriveId,
+                    updateDocumentDialogVisible,
+                    updateDocumentForm,
+                    openUpdateDocumentDialog,
+                    updateDocument,
+                    editDocumentDialogVisible,
+                    editDocumentForm,
+                    openEditDocumentDialog,
+                    saveDocumentInfo,
+                    confirmDeleteDocument,
                     openImportExcelDialog
                 };
             }

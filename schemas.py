@@ -3,9 +3,18 @@ PLM Pydantic 验证模型 - EMS/ODM 客户项目模式
 """
 
 from datetime import date, datetime
-from typing import Any, Optional
+from typing import Any, Optional, Union, Annotated
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, BeforeValidator
+
+
+def empty_str_to_none(v: Any) -> Any:
+    if v == "" or v == "null" or v == "undefined":
+        return None
+    return v
+
+
+OptionalDate = Annotated[Optional[date], BeforeValidator(empty_str_to_none)]
 
 
 class BaseSchema(BaseModel):
@@ -105,8 +114,9 @@ class BOMVersionBase(BaseSchema):
     created_by: Optional[str] = Field(None, max_length=100)
 
 
-class BOMVersionCreate(BOMVersionBase):
-    pass
+class BOMVersionCreate(BaseSchema):
+    version_code: str = Field(..., max_length=20)
+    change_notes: Optional[str] = None
 
 
 class BOMVersionUpdate(BaseSchema):
@@ -137,6 +147,7 @@ class BOMVersionBrief(BaseSchema):
 class BOMItemBase(BaseSchema):
     bom_version_id: int
     category: Optional[str] = Field(None, max_length=50)
+    sub_module: Optional[str] = Field("", max_length=50)
     mpn: Optional[str] = Field(None, max_length=100)
     name: str = Field(..., max_length=200)
     quantity: int = Field(default=1, ge=0)
@@ -153,6 +164,7 @@ class BOMItemCreate(BOMItemBase):
 class BOMItemUpdate(BaseSchema):
     bom_version_id: Optional[int] = None
     category: Optional[str] = Field(None, max_length=50)
+    sub_module: Optional[str] = Field(None, max_length=50)
     mpn: Optional[str] = Field(None, max_length=100)
     name: Optional[str] = Field(None, max_length=200)
     quantity: Optional[int] = Field(None, ge=0)
@@ -184,7 +196,8 @@ class DocumentBase(BaseSchema):
     bom_item_id: Optional[int] = None
     title: str = Field(..., max_length=300)
     document_type: Optional[str] = Field(None, max_length=50)
-    version: str = Field(default="1", max_length=20)
+    version: Optional[str] = Field(default="1", max_length=20)
+    received_date: OptionalDate = None
     google_drive_id: str = Field(..., max_length=100)
     file_name: Optional[str] = Field(None, max_length=255)
     file_size: Optional[int] = Field(None, ge=0)
@@ -203,6 +216,7 @@ class DocumentUpdate(BaseSchema):
     title: Optional[str] = Field(None, max_length=300)
     document_type: Optional[str] = Field(None, max_length=50)
     version: Optional[str] = Field(None, max_length=20)
+    received_date: Optional[date] = None
     google_drive_id: Optional[str] = Field(None, max_length=100)
     file_name: Optional[str] = Field(None, max_length=255)
     file_size: Optional[int] = Field(None, ge=0)
@@ -220,6 +234,7 @@ class DocumentBrief(BaseSchema):
     title: str
     document_type: Optional[str] = None
     version: str
+    received_date: Optional[date] = None
     status: str
 
 
