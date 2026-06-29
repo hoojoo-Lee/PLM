@@ -9,6 +9,7 @@ from schemas import (
     BOMVersionBrief,
     BOMVersionCreate,
     BOMVersionResponse,
+    ChangeLogResponse,
     DocumentResponse,
     ProductCreate,
     ProductResponse,
@@ -135,4 +136,22 @@ def get_product_global_documents(product_id: int, db: Session = Depends(get_db))
         models.Document.product_id == product_id,
         models.Document.bom_item_id.is_(None)
     ).all()
+    
+    # 兜底处理：确保 version 字段不为空
+    for doc in documents:
+        if not doc.version or not str(doc.version).strip():
+            doc.version = "v1"
+    
     return documents
+
+
+@router.get("/{product_id}/changelog", response_model=List[ChangeLogResponse])
+def get_product_changelog(product_id: int, db: Session = Depends(get_db)):
+    """获取产品的变更历史日志，按时间倒序返回"""
+    product = db.query(models.Product).get(product_id)
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    changelogs = db.query(models.ChangeLog).filter(
+        models.ChangeLog.product_id == product_id
+    ).order_by(models.ChangeLog.created_at.desc()).limit(100).all()
+    return changelogs

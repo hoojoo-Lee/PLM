@@ -243,21 +243,23 @@ class DocumentBrief(BaseSchema):
 # =============================================================================
 
 class ChangeLogBase(BaseSchema):
+    product_id: Optional[int] = None
     entity_type: str = Field(..., max_length=30)
     entity_id: int
     entity_name: Optional[str] = Field(None, max_length=200)
-    change_type: str = Field(..., max_length=20)
+    action: str = Field(..., max_length=20)
     change_summary: str
-    change_detail: Optional[str] = Field(None, max_length=1000)
-    changed_by: Optional[str] = Field(None, max_length=100)
 
 
 class ChangeLogCreate(ChangeLogBase):
-    pass
+    details: Optional[dict] = None
+    changed_by: Optional[str] = Field(None, max_length=100)
 
 
 class ChangeLogResponse(ChangeLogBase):
     id: int
+    details: Optional[dict] = None
+    changed_by: Optional[str] = Field(None, max_length=100)
     created_at: datetime
 
 

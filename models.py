@@ -13,6 +13,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Integer,
+    JSON,
     String,
     Text,
     UniqueConstraint,
@@ -172,13 +173,19 @@ class ChangeLog(Base):
 
     id = Column(BigInteger, primary_key=True)
     
+    product_id = Column(BigInteger, ForeignKey("products.id", ondelete="SET NULL"), comment="关联产品 ID")
+    
     entity_type = Column(String(30), nullable=False, comment="实体类型: Product/BOM/Doc")
     entity_id = Column(BigInteger, nullable=False, comment="实体主键")
     entity_name = Column(String(200), comment="实体名称")
     
-    change_type = Column(String(20), nullable=False, comment="变更类型: create/update/delete/archive")
+    action = Column(String(20), nullable=False, comment="操作类型: create/update/delete/archive")
+    
+    change_type = Column(String(20), nullable=False, default="modified", comment="变更类型: created/modified/deleted/archived")
+    
+    details = Column(JSON, comment="变更详情 JSON: old_drive_id, new_drive_id, old_version, new_version, update_notes")
+    
     change_summary = Column(Text, nullable=False, comment="变更说明")
-    change_detail = Column(String(1000), comment="变更详情")
     
     changed_by = Column(String(100), comment="变更人")
     
