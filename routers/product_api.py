@@ -66,6 +66,8 @@ def update_product(product_id: int, payload: ProductUpdate, db: Session = Depend
         product.code = payload.code
     if payload.name is not None:
         product.name = payload.name
+    if payload.customer_name is not None:
+        product.customer_name = payload.customer_name
     if payload.description is not None:
         product.description = payload.description
     if payload.status is not None:

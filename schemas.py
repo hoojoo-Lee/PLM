@@ -32,7 +32,8 @@ class TimestampSchema(BaseSchema):
 
 class ProductBase(BaseSchema):
     name: str = Field(..., max_length=200)
-    code: str = Field(..., max_length=50)
+    customer_name: str = Field(..., max_length=100)
+    code: Optional[str] = Field(None, max_length=50)
     description: Optional[str] = None
     status: str = Field(default="active")
 
@@ -43,6 +44,7 @@ class ProductCreate(ProductBase):
 
 class ProductUpdate(BaseSchema):
     name: Optional[str] = Field(None, max_length=200)
+    customer_name: Optional[str] = Field(None, max_length=100)
     code: Optional[str] = Field(None, max_length=50)
     description: Optional[str] = None
     status: Optional[str] = None
@@ -253,6 +255,7 @@ class ChangeLogBase(BaseSchema):
     change_type: str = Field(..., max_length=20)
     change_summary: str
     change_detail: Optional[str] = Field(None, max_length=1000)
+    manual_note: Optional[str] = None
     changed_by: Optional[str] = Field(None, max_length=100)
 
 
@@ -263,6 +266,38 @@ class ChangeLogCreate(ChangeLogBase):
 class ChangeLogResponse(ChangeLogBase):
     id: int
     created_at: datetime
+
+
+# =============================================================================
+# 甘特图任务 (GanttTask)
+# =============================================================================
+
+class GanttTaskBase(BaseSchema):
+    task_text: str = Field(..., max_length=200)
+    start_date: date
+    end_date: date
+    progress: float = Field(0, ge=0, le=1)
+    dependencies: Optional[str] = ""
+    assignee: Optional[str] = Field("", max_length=100)
+
+
+class GanttTaskCreate(GanttTaskBase):
+    product_id: int
+
+
+class GanttTaskUpdate(BaseSchema):
+    text: Optional[str] = None
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    progress: Optional[float] = None
+    dependencies: Optional[str] = None
+    assignee: Optional[str] = None
+
+
+class GanttTaskResponse(GanttTaskBase):
+    id: int
+    product_id: int
+    created_at: Optional[datetime] = None
 
 
 # =============================================================================

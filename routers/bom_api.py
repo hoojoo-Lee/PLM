@@ -391,6 +391,21 @@ def get_bom_item_changelog(item_id: int, db: Session = Depends(get_db)):
     return changelogs
 
 
+@router.put("/changelogs/{log_id}/note", response_model=dict)
+def update_changelog_note(log_id: int, payload: dict, db: Session = Depends(get_db)):
+    changelog = db.query(models.ChangeLog).get(log_id)
+    if not changelog:
+        raise HTTPException(status_code=404, detail="ChangeLog not found")
+    
+    manual_note = payload.get("manual_note", "")
+    changelog.manual_note = manual_note
+    db.add(changelog)
+    db.commit()
+    db.refresh(changelog)
+    
+    return {"status": "success", "message": "备注已保存"}
+
+
 def _extract_drive_id(input_str: str) -> str:
     if not input_str:
         return ''

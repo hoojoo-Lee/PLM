@@ -46,13 +46,18 @@ from routers.product_api import router as product_router
 from routers.project_api import router as project_router
 from routers.bom_api import router as bom_router
 from routers.document_api import router as document_router
+from routers.gantt_api import router as gantt_router
 
 app.include_router(product_router)
 app.include_router(project_router)
 app.include_router(bom_router)
 app.include_router(document_router)
+app.include_router(gantt_router)
 
 # 挂载静态文件目录，用于本地图片上传
 upload_dir = os.path.join(os.path.dirname(__file__), "uploads")
 os.makedirs(upload_dir, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=upload_dir), name="uploads")
+
+# 挂载前端静态文件
+app.mount("/", StaticFiles(directory=os.path.dirname(__file__), html=True), name="frontend")

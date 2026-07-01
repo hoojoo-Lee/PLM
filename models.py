@@ -8,9 +8,11 @@ from typing import Optional
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     Column,
     Date,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     JSON,
@@ -34,8 +36,9 @@ class Product(Base):
 
     id = Column(BigInteger, primary_key=True)
     name = Column(String(200), nullable=False, comment="产品名称/客户项目名称")
-    code = Column(String(50), unique=True, nullable=False, comment="产品编码/项目编号")
-    description = Column(Text, comment="产品描述/项目描述")
+    customer_name = Column(String(100), default="", comment="客户名称")
+    code = Column(String(50), unique=True, nullable=True, comment="产品编码/项目编号（可选）")
+    description = Column(Text, comment="产品描述/项目描述（可选）")
     status = Column(String(20), server_default=text("'active'"), comment="状态: active/inactive")
     created_at = Column(DateTime(timezone=True), server_default=text("now()"))
     updated_at = Column(DateTime(timezone=True), server_default=text("now()"), onupdate=datetime.utcnow)
@@ -183,6 +186,45 @@ class ChangeLog(Base):
     change_summary = Column(Text, nullable=False, comment="变更说明")
     change_detail = Column(String(1000), comment="变更详情")
     
+    manual_note = Column(Text, default="", comment="工程师填写的变更备注/原因")
+    
     changed_by = Column(String(100), comment="变更人")
     
     created_at = Column(DateTime(timezone=True), server_default=text("now()"))
+
+
+class GanttTask(Base):
+    """甘特图任务模型"""
+    __tablename__ = "gantt_tasks"
+
+    id = Column(BigInteger, primary_key=True)
+    product_id = Column(BigInteger, ForeignKey("products.id"), nullable=False, index=True)
+    
+    task_text = Column(String(200), nullable=False, comment="任务名称")
+    start_date = Column(Date, nullable=False, comment="开始日期")
+    end_date = Column(Date, nullable=False, comment="结束日期")
+    duration = Column(Integer, default=1, comment="持续天数")
+    is_workday_only = Column(Boolean, default=False, comment="是否仅工作日")
+    progress = Column(Float, default=0, comment="进度 0-1")
+    
+    dependencies = Column(String(500), default="", comment="紧前依赖任务ID，逗号分隔")
+    assignee = Column(String(100), default="", comment="负责人")
+    
+    created_at = Column(DateTime(timezone=True), server_default=text("now()"))
+
+
+class SysHoliday(Base):
+    """系统节假日模型"""
+    __tablename__ = "sys_holidays"
+
+    date = Column(Date, primary_key=True, comment="节假日日期")
+    note = Column(String(100), comment="节假日名称")
+
+
+class TaskTemplate(Base):
+    """任务模板模型"""
+    __tablename__ = "task_templates"
+
+    id = Column(BigInteger, primary_key=True)
+    name = Column(String(200), nullable=False, comment="模板名称")
+    default_duration = Column(Integer, default=1, comment="默认持续天数")

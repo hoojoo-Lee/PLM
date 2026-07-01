@@ -10,6 +10,8 @@
     <script src="https://unpkg.com/@element-plus/icons-vue"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/frappe-gantt/0.6.1/frappe-gantt.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/frappe-gantt/0.6.1/frappe-gantt.min.js"></script>
     <script>
         tailwind.config = {
             corePlugins: { preflight: false },
@@ -96,7 +98,7 @@
                     >
                         <template #default="{ data }">
                             <div class="flex items-center justify-between w-full">
-                                <span>{{ data.name }}</span>
+                                <span>{{ data.customer_name ? '[' + data.customer_name + ']' : '' }}{{ data.name }}</span>
                                 <el-tag v-if="data.status" :type="data.status === 'active' ? 'success' : 'info'" size="small">
                                     {{ data.status === 'active' ? '启用' : '封存' }}
                                 </el-tag>
@@ -129,144 +131,168 @@
                                     </div>
                                 </div>
                             </template>
-                            <h2 class="text-2xl font-bold text-gray-900 mb-2">{{ selectedItem.data.name }}</h2>
-                            <p v-if="selectedItem.data.description" class="text-gray-500">{{ selectedItem.data.description }}</p>
-                            <p v-else class="text-gray-300 text-sm italic">暂无产品描述</p>
+                            <h2 class="text-2xl font-bold text-gray-900 mb-2">{{ selectedItem.data.customer_name ? '[' + selectedItem.data.customer_name + ']' : '' }}{{ selectedItem.data.name }}</h2>
                         </el-card>
 
-                        <el-card shadow="hover">
-                            <template #header>
-                                <div class="flex items-center justify-between">
-                                    <span class="flex items-center space-x-2">
-                                        <el-icon><GitBranch class="w-5 h-5 text-blue-600" /></el-icon>
-                                        <span class="font-semibold">BOM 版本管理</span>
-                                    </span>
-                                    <div class="flex items-center space-x-2">
-                                        <el-button size="small" type="primary" @click="openCreateBomVersionDialog">
-                                            <el-icon><Plus class="w-4 h-4 mr-1" /></el-icon>
-                                            创建新 BOM 版本
-                                        </el-button>
-                                        <el-button size="small" @click="openImportExcelDialog">
-                                            <el-icon><Upload class="w-4 h-4 mr-1" /></el-icon>
-                                            导入客户 Excel BOM
-                                        </el-button>
-                                    </div>
-                                </div>
-                            </template>
-                            <!-- BOM 版本列表 -->
-                            <div v-if="productBomVersions.length === 0" class="p-4 bg-blue-50 rounded-lg">
-                                <div class="flex items-start space-x-3">
-                                    <el-icon class="w-5 h-5 text-blue-500 mt-0.5"><InfoFilled /></el-icon>
-                                    <div>
-                                        <p class="text-sm font-medium text-blue-800">录入物料前，请先创建一个 BOM 版本！</p>
-                                        <p class="text-xs text-blue-600 mt-1">每次客户发来新的 BOM，点击"创建新 BOM 版本"即可自动封存旧版本。</p>
-                                    </div>
-                                </div>
-                            </div>
-                            <div v-else class="space-y-2">
-                                <div v-for="bv in productBomVersions" :key="bv.id" class="flex items-center justify-between p-3 bg-white border border-gray-200 rounded-lg hover:shadow-sm transition-shadow">
-                                    <div class="flex items-center space-x-3">
-                                        <span v-if="editingBomVersionCode !== bv.id" class="font-semibold text-gray-900 cursor-pointer hover:text-blue-600" @dblclick="startEditBomVersionCode(bv)">{{ bv.version_code }}</span>
-                                        <el-input v-else v-model="tempBomVersionCode" size="small" style="width:100px" @blur="saveBomVersionCode(bv)" @keyup.enter="saveBomVersionCode(bv)" />
-                                        <el-button v-if="editingBomVersionCode !== bv.id" size="small" link class="text-gray-300 hover:text-blue-600" @click="startEditBomVersionCode(bv)"><el-icon><Edit class="w-3 h-3" /></el-icon></el-button>
-                                        <el-tag :type="bv.status === 'active' ? 'success' : 'info'" size="small">{{ bv.status === 'active' ? '启用' : '封存' }}</el-tag>
-                                        <span class="text-xs text-gray-400">{{ formatDate(bv.received_at) }}</span>
-                                    </div>
-                                    <div class="flex items-center space-x-2">
-                                        <el-button v-if="bv.status === 'archived'" size="small" type="success" @click="activateBomVersion(bv.id)" plain>启用</el-button>
-                                        <el-button v-if="bv.status === 'active'" size="small" type="warning" @click="archiveBomVersion(bv.id)" plain>封存</el-button>
-                                        <el-button size="small" type="danger" @click="confirmDeleteBomVersion(bv)" plain>删除</el-button>
-                                    </div>
-                                </div>
-                            </div>
-                        </el-card>
-
-                        <!-- BOM 概览 - 灵动拖拽网格 -->
-                        <el-card shadow="hover" v-if="activeBomItems.length > 0">
-                            <template #header>
-                                <div class="flex items-center justify-between">
-                                    <span class="flex items-center space-x-2">
-                                        <el-icon><Grid class="w-5 h-5 text-blue-600" /></el-icon>
-                                        <span class="font-semibold">BOM 概览</span>
-                                        <el-tag size="small" type="info">{{ activeBomItems.length }} 项</el-tag>
-                                    </span>
-                                    <el-button size="small" @click="saveItemOrder" type="success" plain>
-                                        <el-icon><Check class="w-4 h-4 mr-1" /></el-icon>保存排序
-                                    </el-button>
-                                </div>
-                            </template>
-                            <div id="bom-overview-grid" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-                                <div v-for="item in activeBomItems" :key="item.id" class="bg-white border border-gray-200 rounded-lg p-3 cursor-move hover:shadow-md transition-shadow" :data-id="item.id">
-                                    <div class="h-20 bg-gray-50 rounded mb-2 flex items-center justify-center overflow-hidden">
-                                        <img v-if="item.picture_drive_id" :src="getDriveImageUrl(item.picture_drive_id)" :alt="item.name" class="w-full h-full object-contain bg-gray-50" @error="$event.target.style.display='none'">
-                                        <el-icon v-else class="w-8 h-8 text-gray-300"><Picture /></el-icon>
-                                    </div>
-                                    <div class="text-xs font-semibold text-gray-900 truncate" :title="item.name">{{ item.name }}</div>
-                                    <div class="flex items-center justify-between mt-1">
-                                        <span class="text-xs font-mono text-gray-400">{{ item.mpn || '-' }}</span>
-                                        <el-tag size="small" :type="item.responsible_party === '客户方' ? 'warning' : 'success'">{{ item.responsible_party }}</el-tag>
-                                    </div>
-                                    <el-tag size="small" class="mt-1" type="info">{{ item.category }}</el-tag>
-                                </div>
-                            </div>
-                        </el-card>
-
-                        <el-card shadow="hover">
-                            <template #header>
-                                <div class="flex items-center justify-between">
-                                    <span class="flex items-center space-x-2">
-                                        <el-icon><FileText class="w-5 h-5 text-blue-600" /></el-icon>
-                                        <span class="font-semibold">产品级全局文件</span>
-                                    </span>
-                                    <el-button size="small" type="primary" @click="openCreateDocumentDialog">
-                                        <el-icon><Plus class="w-4 h-4 mr-1" /></el-icon>
-                                        新增全局文件
-                                    </el-button>
-                                </div>
-                            </template>
-                            <div v-if="globalDocuments.length === 0" class="border-2 border-dashed border-gray-300 rounded-lg p-12 flex flex-col items-center justify-center add-card-hover transition-all duration-200 cursor-pointer" @click="openCreateDocumentDialog">
-                                <el-icon class="w-16 h-16 text-gray-400 mb-4"><Plus /></el-icon>
-                                <p class="text-gray-500 text-sm">添加产品级文件（如：PRD、总装 SOP、整体测试规范等）</p>
-                            </div>
-                            <el-row :gutter="20" v-else>
-                                <el-col :xs="24" :sm="12" :lg="8" v-for="doc in globalDocuments" :key="doc.id">
-                                    <el-card shadow="hover" class="bg-gradient-to-br from-blue-50 to-blue-100">
-                                        <div class="flex items-start justify-between mb-2">
-                                            <div class="flex items-center space-x-2">
-                                                <span class="font-semibold">{{ doc.title }}</span>
-                                                <el-button size="small" @click="openEditDocumentDialog(doc)" class="text-gray-400 hover:text-gray-600 p-1">
-                                                    <el-icon><Edit class="w-3 h-3" /></el-icon>
-                                                </el-button>
+                        <el-tabs v-model="activeProductTab" type="card">
+                            <el-tab-pane label="BOM 视图" name="bom">
+                                <div class="space-y-6">
+                                    <el-card shadow="hover">
+                                        <template #header>
+                                            <div class="flex items-center justify-between">
+                                                <span class="flex items-center space-x-2">
+                                                    <el-icon><GitBranch class="w-5 h-5 text-blue-600" /></el-icon>
+                                                    <span class="font-semibold">BOM 版本管理</span>
+                                                </span>
+                                                <div class="flex items-center space-x-2">
+                                                    <el-button size="small" type="primary" @click="openCreateBomVersionDialog">
+                                                        <el-icon><Plus class="w-4 h-4 mr-1" /></el-icon>
+                                                        创建新 BOM 版本
+                                                    </el-button>
+                                                    <el-button size="small" @click="openImportExcelDialog">
+                                                        <el-icon><Upload class="w-4 h-4 mr-1" /></el-icon>
+                                                        导入客户 Excel BOM
+                                                    </el-button>
+                                                </div>
                                             </div>
-                                            <el-tag size="small" type="primary">{{ formatVersion(doc.version) }}</el-tag>
+                                        </template>
+                                        <!-- BOM 版本列表 -->
+                                        <div v-if="productBomVersions.length === 0" class="p-4 bg-blue-50 rounded-lg">
+                                            <div class="flex items-start space-x-3">
+                                                <el-icon class="w-5 h-5 text-blue-500 mt-0.5"><InfoFilled /></el-icon>
+                                                <div>
+                                                    <p class="text-sm font-medium text-blue-800">录入物料前，请先创建一个 BOM 版本！</p>
+                                                    <p class="text-xs text-blue-600 mt-1">每次客户发来新的 BOM，点击"创建新 BOM 版本"即可自动封存旧版本。</p>
+                                                </div>
+                                            </div>
                                         </div>
-                                        <div class="flex items-center space-x-2 mb-2">
-                                            <el-icon class="w-3 h-3 text-gray-400"><Calendar /></el-icon>
-                                            <span class="text-xs text-gray-500">{{ formatDate(doc.received_date) }}</span>
-                                        </div>
-                                        <p v-if="doc.update_notes" class="text-xs text-gray-500 mb-3">{{ doc.update_notes }}</p>
-                                        <div class="flex space-x-2">
-                                            <el-button size="small" @click="previewDocument(doc)" class="text-xs">
-                                                <el-icon><View class="w-3 h-3 mr-1" /></el-icon>
-                                                预览
-                                            </el-button>
-                                            <el-button size="small" @click="openDocChangelogDialog(doc)" class="text-xs">
-                                                <el-icon><Clock class="w-3 h-3 mr-1" /></el-icon>
-                                                历史
-                                            </el-button>
-                                            <el-button size="small" type="primary" @click="openUpdateDocumentDialog(doc)" class="text-xs">
-                                                <el-icon><Refresh class="w-3 h-3 mr-1" /></el-icon>
-                                                更新版本
-                                            </el-button>
-                                            <el-button size="small" type="danger" @click="confirmDeleteDocument(doc)" class="text-xs">
-                                                <el-icon><Delete class="w-3 h-3 mr-1" /></el-icon>
-                                                删除
-                                            </el-button>
+                                        <div v-else class="space-y-2">
+                                            <div v-for="bv in productBomVersions" :key="bv.id" class="flex items-center justify-between p-3 bg-white border border-gray-200 rounded-lg hover:shadow-sm transition-shadow">
+                                                <div class="flex items-center space-x-3">
+                                                    <span v-if="editingBomVersionCode !== bv.id" class="font-semibold text-gray-900 cursor-pointer hover:text-blue-600" @dblclick="startEditBomVersionCode(bv)">{{ bv.version_code }}</span>
+                                                    <el-input v-else v-model="tempBomVersionCode" size="small" style="width:100px" @blur="saveBomVersionCode(bv)" @keyup.enter="saveBomVersionCode(bv)" />
+                                                    <el-button v-if="editingBomVersionCode !== bv.id" size="small" link class="text-gray-300 hover:text-blue-600" @click="startEditBomVersionCode(bv)"><el-icon><Edit class="w-3 h-3" /></el-icon></el-button>
+                                                    <el-tag :type="bv.status === 'active' ? 'success' : 'info'" size="small">{{ bv.status === 'active' ? '启用' : '封存' }}</el-tag>
+                                                    <span class="text-xs text-gray-400">{{ formatDate(bv.received_at) }}</span>
+                                                </div>
+                                                <div class="flex items-center space-x-2">
+                                                    <el-button v-if="bv.status === 'archived'" size="small" type="success" @click="activateBomVersion(bv.id)" plain>启用</el-button>
+                                                    <el-button v-if="bv.status === 'active'" size="small" type="warning" @click="archiveBomVersion(bv.id)" plain>封存</el-button>
+                                                    <el-button size="small" type="danger" @click="confirmDeleteBomVersion(bv)" plain>删除</el-button>
+                                                </div>
+                                            </div>
                                         </div>
                                     </el-card>
-                                </el-col>
-                            </el-row>
-                        </el-card>
+
+                                    <!-- BOM 概览 - 灵动拖拽网格 -->
+                                    <el-card shadow="hover" v-if="activeBomItems.length > 0">
+                                        <template #header>
+                                            <div class="flex items-center justify-between">
+                                                <span class="flex items-center space-x-2">
+                                                    <el-icon><Grid class="w-5 h-5 text-blue-600" /></el-icon>
+                                                    <span class="font-semibold">BOM 概览</span>
+                                                    <el-tag size="small" type="info">{{ activeBomItems.length }} 项</el-tag>
+                                                </span>
+                                                <el-button size="small" @click="saveItemOrder" type="success" plain>
+                                                    <el-icon><Check class="w-4 h-4 mr-1" /></el-icon>保存排序
+                                                </el-button>
+                                            </div>
+                                        </template>
+                                        <div id="bom-overview-grid" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+                                            <div v-for="item in activeBomItems" :key="item.id" class="bg-white border border-gray-200 rounded-lg p-3 cursor-move hover:shadow-md transition-shadow" :data-id="item.id">
+                                                <div class="h-20 bg-gray-50 rounded mb-2 flex items-center justify-center overflow-hidden">
+                                                    <img v-if="item.picture_drive_id" :src="getDriveImageUrl(item.picture_drive_id)" :alt="item.name" class="w-full h-full object-contain bg-gray-50" @error="$event.target.style.display='none'">
+                                                    <el-icon v-else class="w-8 h-8 text-gray-300"><Picture /></el-icon>
+                                                </div>
+                                                <div class="text-xs font-semibold text-gray-900 truncate" :title="item.name">{{ item.name }}</div>
+                                                <div class="flex items-center justify-between mt-1">
+                                                    <span class="text-xs font-mono text-gray-400">{{ item.mpn || '-' }}</span>
+                                                    <el-tag size="small" :type="item.responsible_party === '客户方' ? 'warning' : 'success'">{{ item.responsible_party }}</el-tag>
+                                                </div>
+                                                <el-tag size="small" class="mt-1" type="info">{{ item.category }}</el-tag>
+                                            </div>
+                                        </div>
+                                    </el-card>
+                                </div>
+                            </el-tab-pane>
+
+                            <el-tab-pane label="文控中心" name="docs">
+                                <div class="space-y-6">
+                                    <el-card shadow="hover">
+                                        <template #header>
+                                            <div class="flex items-center justify-between">
+                                                <span class="flex items-center space-x-2">
+                                                    <el-icon><FileText class="w-5 h-5 text-blue-600" /></el-icon>
+                                                    <span class="font-semibold">产品级全局文件</span>
+                                                </span>
+                                                <el-button size="small" type="primary" @click="openCreateDocumentDialog">
+                                                    <el-icon><Plus class="w-4 h-4 mr-1" /></el-icon>
+                                                    新增全局文件
+                                                </el-button>
+                                            </div>
+                                        </template>
+                                        <div v-if="globalDocuments.length === 0" class="border-2 border-dashed border-gray-300 rounded-lg p-12 flex flex-col items-center justify-center add-card-hover transition-all duration-200 cursor-pointer" @click="openCreateDocumentDialog">
+                                            <el-icon class="w-16 h-16 text-gray-400 mb-4"><Plus /></el-icon>
+                                            <p class="text-gray-500 text-sm">添加产品级文件（如：PRD、总装 SOP、整体测试规范等）</p>
+                                        </div>
+                                        <el-row :gutter="20" v-else>
+                                            <el-col :xs="24" :sm="12" :lg="8" v-for="doc in globalDocuments" :key="doc.id">
+                                                <el-card shadow="hover" class="bg-gradient-to-br from-blue-50 to-blue-100">
+                                                    <div class="flex items-start justify-between mb-2">
+                                                        <div class="flex items-center space-x-2">
+                                                            <span class="font-semibold">{{ doc.title }}</span>
+                                                            <el-button size="small" @click="openEditDocumentDialog(doc)" class="text-gray-400 hover:text-gray-600 p-1">
+                                                                <el-icon><Edit class="w-3 h-3" /></el-icon>
+                                                            </el-button>
+                                                        </div>
+                                                        <el-tag size="small" type="primary">{{ formatVersion(doc.version) }}</el-tag>
+                                                    </div>
+                                                    <div class="flex items-center space-x-2 mb-2">
+                                                        <el-icon class="w-3 h-3 text-gray-400"><Calendar /></el-icon>
+                                                        <span class="text-xs text-gray-500">{{ formatDate(doc.received_date) }}</span>
+                                                    </div>
+                                                    <p v-if="doc.update_notes" class="text-xs text-gray-500 mb-3">{{ doc.update_notes }}</p>
+                                                    <div class="flex space-x-2">
+                                                        <el-button size="small" @click="previewDocument(doc)" class="text-xs">
+                                                            <el-icon><View class="w-3 h-3 mr-1" /></el-icon>
+                                                            预览
+                                                        </el-button>
+                                                        <el-button size="small" @click="openDocChangelogDialog(doc)" class="text-xs">
+                                                            <el-icon><Clock class="w-3 h-3 mr-1" /></el-icon>
+                                                            历史
+                                                        </el-button>
+                                                        <el-button size="small" type="primary" @click="openUpdateDocumentDialog(doc)" class="text-xs">
+                                                            <el-icon><Refresh class="w-3 h-3 mr-1" /></el-icon>
+                                                            更新版本
+                                                        </el-button>
+                                                        <el-button size="small" type="danger" @click="confirmDeleteDocument(doc)" class="text-xs">
+                                                            <el-icon><Delete class="w-3 h-3 mr-1" /></el-icon>
+                                                            删除
+                                                        </el-button>
+                                                    </div>
+                                                </el-card>
+                                            </el-col>
+                                        </el-row>
+                                    </el-card>
+                                </div>
+                            </el-tab-pane>
+
+                            <el-tab-pane label="项目排程 (Gantt)" name="gantt">
+                                <div>
+                                    <div class="flex items-center justify-between mb-4">
+                                        <div class="flex items-center space-x-2">
+                                            <el-button type="primary" size="small" @click="openAddGanttTaskDialog">
+                                                <el-icon><Plus class="w-4 h-4 mr-1" /></el-icon>极速新增任务
+                                            </el-button>
+                                            <el-button type="info" @click="templateDrawerVisible = true">
+                                                <el-icon><Menu /></el-icon>任务模板库
+                                            </el-button>
+                                        </div>
+                                    </div>
+                                    <div id="gantt-container" class="bg-white rounded-lg border border-gray-200"></div>
+                                </div>
+                            </el-tab-pane>
+                        </el-tabs>
                     </div>
 
                     <div v-else-if="selectedItem.type === 'bom_version'" class="space-y-6">
@@ -521,73 +547,67 @@
                                             <span>ECN 变更记录</span>
                                         </span>
                                     </template>
-                                    <!-- 上半区：人工业务总结 -->
-                                    <div class="mb-6">
-                                        <div class="flex items-center justify-between mb-3">
-                                            <h3 class="font-semibold text-gray-800 flex items-center">
-                                                <el-icon class="w-4 h-4 mr-2 text-purple-600"><EditPen /></el-icon>
-                                                人工变更总结
-                                            </h3>
-                                            <el-button type="primary" size="small" @click="openAddBomVersionDocDialog">
-                                                <el-icon><Plus class="w-4 h-4 mr-1" /></el-icon>
-                                                新增变更记录
-                                            </el-button>
-                                        </div>
-                                        <div v-if="bomVersionDocuments.length === 0" class="border-2 border-dashed border-gray-300 rounded-lg p-8 flex flex-col items-center justify-center">
-                                            <el-icon class="w-12 h-12 text-gray-300 mb-3"><EditPen /></el-icon>
-                                            <p class="text-gray-400 text-sm">暂无人工变更记录</p>
-                                        </div>
-                                        <div v-else class="space-y-3">
-                                            <div v-for="doc in bomVersionDocuments" :key="doc.id" class="p-3 bg-white border border-gray-200 rounded-lg hover:shadow-sm transition-shadow">
-                                                <div class="flex items-start justify-between mb-1">
-                                                    <div class="flex items-center space-x-2">
-                                                        <el-tag size="small" :type="doc.document_type === 'ecn' ? 'danger' : 'info'">{{ doc.document_type === 'ecn' ? 'ECN' : (doc.document_type || '记录') }}</el-tag>
-                                                        <span class="font-semibold text-sm text-gray-900">{{ doc.title }}</span>
-                                                    </div>
-                                                    <div class="flex items-center space-x-2">
-                                                        <span class="text-xs text-gray-400">{{ formatDate(doc.received_date) }}</span>
-                                                        <el-button size="small" type="danger" link @click="confirmDeleteDocument(doc)"><el-icon><Delete class="w-3 h-3" /></el-icon></el-button>
-                                                    </div>
-                                                </div>
-                                                <p v-if="doc.update_notes" class="text-sm text-gray-600 mt-1 whitespace-pre-wrap">{{ doc.update_notes }}</p>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <!-- 下半区：自动变更明细 -->
+                                    <!-- ECN 变更聚合报表 -->
                                     <div>
                                         <div class="flex items-center justify-between mb-3">
                                             <h3 class="font-semibold text-gray-800 flex items-center">
                                                 <el-icon class="w-4 h-4 mr-2 text-blue-600"><Clock /></el-icon>
-                                                底层物料变更明细
-                                                <el-tag size="small" type="info" class="ml-2">自动抓取</el-tag>
+                                                ECN 变更聚合报表
                                             </h3>
-                                            <el-button size="small" @click="loadAggregatedChangelogs" plain>
-                                                <el-icon><Refresh class="w-3 h-3 mr-1" /></el-icon>刷新
-                                            </el-button>
+                                            <div class="flex items-center space-x-2">
+                                                <el-button size="small" @click="loadAggregatedChangelogs" plain>
+                                                    <el-icon><Refresh class="w-3 h-3 mr-1" /></el-icon>刷新
+                                                </el-button>
+                                                <el-button size="small" type="success" @click="exportEcnToCsv">
+                                                    <el-icon><Download class="w-3 h-3 mr-1" /></el-icon>导出 ECN 报表
+                                                </el-button>
+                                            </div>
                                         </div>
                                         <div v-if="aggregatedLogs.length === 0" class="border-2 border-dashed border-gray-200 rounded-lg p-8 flex flex-col items-center justify-center">
                                             <el-icon class="w-12 h-12 text-gray-300 mb-3"><Clock /></el-icon>
                                             <p class="text-gray-400 text-sm">暂无底层物料变更记录</p>
                                             <p class="text-xs text-gray-300 mt-1">更新物料文件或版本后，变更将自动出现在此处</p>
                                         </div>
-                                        <el-timeline v-else>
-                                            <el-timeline-item v-for="log in aggregatedLogs" :key="log.id" :timestamp="formatDate(log.created_at)" placement="top">
-                                                <div class="bg-white border border-gray-100 rounded-lg p-3">
-                                                    <div class="flex items-center space-x-2 mb-1">
-                                                        <el-tag size="small" :type="log.action === 'update_component_file' ? 'warning' : (log.action === 'update_picture' ? 'success' : 'info')">
-                                                            {{ log.action === 'update_component_file' ? '文件更新' : (log.action === 'update_picture' ? '图片更新' : (log.action === 'add_design_file' ? '新增文件' : '变更')) }}
+                                        <el-table v-else :data="aggregatedLogs" border stripe class="mt-4">
+                                            <el-table-column prop="created_at" label="变更时间" width="180">
+                                                <template #default="scope">
+                                                    {{ formatDate(scope.row.created_at) }}
+                                                </template>
+                                            </el-table-column>
+                                            <el-table-column prop="item_name" label="变更物料" width="200">
+                                                <template #default="scope">
+                                                    <div>
+                                                        <span class="font-medium">{{ scope.row.item_name }}</span>
+                                                        <span v-if="scope.row.item_mpn" class="text-xs text-gray-400 ml-2 font-mono">{{ scope.row.item_mpn }}</span>
+                                                    </div>
+                                                </template>
+                                            </el-table-column>
+                                            <el-table-column prop="change_summary" label="系统记录 (自动)" width="350">
+                                                <template #default="scope">
+                                                    <div>
+                                                        <el-tag size="small" :type="scope.row.action === 'update_component_file' ? 'warning' : (scope.row.action === 'update_picture' ? 'success' : 'info')">
+                                                            {{ scope.row.action === 'update_component_file' ? '文件更新' : (scope.row.action === 'update_picture' ? '图片更新' : (scope.row.action === 'add_design_file' ? '新增文件' : '变更')) }}
                                                         </el-tag>
-                                                        <span class="font-semibold text-sm">{{ log.item_name }}</span>
-                                                        <span v-if="log.item_mpn" class="text-xs text-gray-400 font-mono">{{ log.item_mpn }}</span>
+                                                        <p class="text-sm text-gray-600 mt-1">{{ scope.row.change_summary }}</p>
+                                                        <div v-if="scope.row.old_version && scope.row.new_version" class="text-xs text-gray-400">
+                                                            版本: {{ scope.row.old_version }} → {{ scope.row.new_version }}
+                                                        </div>
                                                     </div>
-                                                    <p class="text-sm text-gray-600">{{ log.change_summary }}</p>
-                                                    <div v-if="log.old_version && log.new_version" class="text-xs text-gray-400 mt-1">
-                                                        版本: {{ log.old_version }} → {{ log.new_version }}
-                                                    </div>
-                                                </div>
-                                            </el-timeline-item>
-                                        </el-timeline>
+                                                </template>
+                                            </el-table-column>
+                                            <el-table-column label="人工记录 (备注/原因)">
+                                                <template #default="scope">
+                                                    <el-input
+                                                        type="textarea"
+                                                        autosize
+                                                        v-model="scope.row.manual_note"
+                                                        placeholder="填写变更原因/备注..."
+                                                        @blur="saveChangeLogNote(scope.row)"
+                                                        class="w-full"
+                                                    />
+                                                </template>
+                                            </el-table-column>
+                                        </el-table>
                                     </div>
                                 </el-tab-pane>
                             </el-tabs>
@@ -734,14 +754,11 @@
 
         <el-dialog v-model="createProductDialogVisible" title="新增客户产品" width="500px">
             <el-form :model="createProductForm" label-width="100px">
+                <el-form-item label="客户名称" required>
+                    <el-input v-model="createProductForm.customer_name" placeholder="如：Semtech" />
+                </el-form-item>
                 <el-form-item label="产品名称" required>
-                    <el-input v-model="createProductForm.name" placeholder="如：Semtech SX9331" />
-                </el-form-item>
-                <el-form-item label="产品代号" required>
-                    <el-input v-model="createProductForm.code" placeholder="如：SX9331Q" />
-                </el-form-item>
-                <el-form-item label="产品概述">
-                    <el-input type="textarea" :rows="3" v-model="createProductForm.description" placeholder="简要描述产品背景和目标" />
+                    <el-input v-model="createProductForm.name" placeholder="如：SX9331Q/WQ" />
                 </el-form-item>
             </el-form>
             <template #footer>
@@ -752,14 +769,11 @@
 
         <el-dialog v-model="editProductDialogVisible" title="编辑产品信息" width="500px">
             <el-form :model="editProductForm" label-width="100px">
+                <el-form-item label="客户名称" required>
+                    <el-input v-model="editProductForm.customer_name" placeholder="如：Semtech" />
+                </el-form-item>
                 <el-form-item label="产品名称" required>
-                    <el-input v-model="editProductForm.name" placeholder="产品名称" />
-                </el-form-item>
-                <el-form-item label="产品代号" required>
-                    <el-input v-model="editProductForm.code" placeholder="产品代号" />
-                </el-form-item>
-                <el-form-item label="产品概述">
-                    <el-input type="textarea" :rows="4" v-model="editProductForm.description" placeholder="产品描述与背景" />
+                    <el-input v-model="editProductForm.name" placeholder="如：SX9331Q/WQ" />
                 </el-form-item>
             </el-form>
             <template #footer>
@@ -878,30 +892,6 @@
             </template>
         </el-dialog>
 
-        <el-dialog v-model="bomVersionDocDialogVisible" title="新增变更记录" width="500px">
-            <el-form :model="bomVersionDocForm" label-width="100px">
-                <el-form-item label="记录标题" required>
-                    <el-input v-model="bomVersionDocForm.title" placeholder="如：V2.0 ECN 变更、底层 BOM 更新说明" />
-                </el-form-item>
-                <el-form-item label="记录类型">
-                    <el-select v-model="bomVersionDocForm.document_type" placeholder="选择类型">
-                        <el-option label="ECN 变更记录" value="ecn" />
-                        <el-option label="BOM 更新说明" value="bom_excel" />
-                        <el-option label="规格变更" value="specification" />
-                        <el-option label="测试反馈" value="test_report" />
-                        <el-option label="其他" value="other" />
-                    </el-select>
-                </el-form-item>
-                <el-form-item label="变更描述" required>
-                    <el-input type="textarea" :rows="4" v-model="bomVersionDocForm.update_notes" placeholder="请输入变更的详细描述内容..." />
-                </el-form-item>
-            </el-form>
-            <template #footer>
-                <el-button @click="bomVersionDocDialogVisible = false">取消</el-button>
-                <el-button type="primary" @click="addBomVersionDoc">确认保存</el-button>
-            </template>
-        </el-dialog>
-
         <el-dialog v-model="docChangelogVisible" :title="`《${currentDocTitle}》的版本历史`" width="600px">
             <div v-if="docChangelogLoading" class="flex items-center justify-center h-40">
                 <el-icon class="w-8 h-8 animate-spin text-blue-500"><Loading /></el-icon>
@@ -980,6 +970,72 @@
                 <el-button type="primary" @click="confirmUpdateDesignFile">确认更新</el-button>
             </template>
         </el-dialog>
+
+        <el-dialog v-model="addGanttTaskDialogVisible" title="极速新增任务" width="500px">
+            <el-form :model="ganttTaskForm" label-width="100px">
+                <el-form-item label="任务名称" required>
+                    <el-input v-model="ganttTaskForm.text" placeholder="如：结构件开模" />
+                </el-form-item>
+                <el-form-item label="负责人">
+                    <el-input v-model="ganttTaskForm.assignee" placeholder="输入负责人姓名" />
+                </el-form-item>
+                <el-form-item label="开始日期" required>
+                    <el-date-picker v-model="ganttTaskForm.start_date" type="date" placeholder="选择开始日期" />
+                </el-form-item>
+                <el-form-item label="持续天数" required>
+                    <el-input-number v-model="ganttTaskForm.duration" :min="1" :max="365" placeholder="输入持续天数" />
+                </el-form-item>
+                <el-form-item label="仅工作日">
+                    <el-switch v-model="ganttTaskForm.is_workday_only" />
+                    <span class="text-xs text-gray-400 ml-2">开启则跳过节假日</span>
+                </el-form-item>
+                <el-form-item label="紧前依赖">
+                    <el-select v-model="ganttTaskForm.dependencies" multiple placeholder="选择紧前任务（可选）">
+                        <el-option v-for="task in ganttTasks.value" :key="task.id" :label="task.text" :value="task.id" />
+                    </el-select>
+                </el-form-item>
+            </el-form>
+            <template #footer>
+                <el-button @click="addGanttTaskDialogVisible = false">取消</el-button>
+                <el-button type="primary" @click="addGanttTask">确认创建</el-button>
+            </template>
+        </el-dialog>
+
+        <el-drawer v-model="templateDrawerVisible" title="🛠️ 任务模板库 (点击派发)" size="300px">
+            <div class="template-list p-2">
+                <el-alert title="像点菜一样点击下方卡片，即可快速添加到甘特图" type="success" :closable="false" class="mb-4" />
+
+                <el-card
+                    v-for="tpl in taskTemplates"
+                    :key="tpl.id"
+                    shadow="hover"
+                    class="mb-3 cursor-pointer border-l-4 border-blue-500 hover:bg-blue-50 transition-colors"
+                    @click="addGanttTaskFromTemplate(tpl)"
+                >
+                    <div class="font-bold text-gray-700">{{ tpl.template_name }}</div>
+                    <div class="text-xs text-gray-400 mt-1">默认耗时: {{ tpl.default_duration || 1 }} 天</div>
+                </el-card>
+
+                <el-divider>自定义</el-divider>
+                <el-button class="w-full" plain type="primary" @click="addTemplateDialogVisible = true">+ 添加新模板</el-button>
+            </div>
+        </el-drawer>
+
+        <el-dialog v-model="addTemplateDialogVisible" title="添加新模板" width="400px">
+            <el-form :model="{ name: newTemplateName, duration: newTemplateDuration }" label-width="100px">
+                <el-form-item label="模板名称">
+                    <el-input v-model="newTemplateName" placeholder="请输入模板名称" />
+                </el-form-item>
+                <el-form-item label="默认耗时">
+                    <el-input-number v-model="newTemplateDuration" :min="1" :max="30" />
+                    <span class="ml-2 text-gray-400">天</span>
+                </el-form-item>
+            </el-form>
+            <template #footer>
+                <el-button @click="addTemplateDialogVisible = false">取消</el-button>
+                <el-button type="primary" @click="addTaskTemplate">确认添加</el-button>
+            </template>
+        </el-dialog>
     </div>
 
     <script>
@@ -994,8 +1050,27 @@
                 const selectedItem = ref(null);
                 const bomItems = ref([]);
                 const globalDocuments = ref([]);
-                const bomVersionDocuments = ref([]);
                 const aggregatedLogs = ref([]);
+                
+                const activeProductTab = ref('bom');
+                const ganttTasks = ref([]);
+                const ganttViewMode = ref('Week');
+                const ganttInstance = ref(null);
+                const addGanttTaskDialogVisible = ref(false);
+                const ganttTaskForm = ref({
+                    text: '',
+                    assignee: '',
+                    start_date: '',
+                    duration: 1,
+                    is_workday_only: false,
+                    dependencies: []
+                });
+                const sysHolidays = ref([]);
+                const taskTemplates = ref([]);
+                const templateDrawerVisible = ref(false);
+                const addTemplateDialogVisible = ref(false);
+                const newTemplateName = ref('');
+                const newTemplateDuration = ref(1);
                 const productBomVersions = ref([]);
                 
                 const apiStatus = ref('disconnected');
@@ -1041,19 +1116,11 @@
                 const componentPreviewUrl = ref('');
                 const componentPreviewViewUrl = ref('');
 
-                const bomVersionDocDialogVisible = ref(false);
-                const bomVersionDocForm = ref({
-                    title: '',
-                    document_type: '',
-                    update_notes: ''
-                });
-
                 const createProductDialogVisible = ref(false);
-                const createProductForm = ref({ name: '', code: '', description: '' });
+                const createProductForm = ref({ name: '', customer_name: '' });
 
-                // 产品编辑弹窗
                 const editProductDialogVisible = ref(false);
-                const editProductForm = ref({ id: null, name: '', code: '', description: '' });
+                const editProductForm = ref({ id: null, name: '', customer_name: '' });
 
                 // BOM 版本号编辑
                 const editingBomVersionCode = ref(null);
@@ -1405,13 +1472,13 @@
 
                 // ========== 任务4：新增产品 ==========
                 const openCreateProductDialog = () => {
-                    createProductForm.value = { name: '', code: '', description: '' };
+                    createProductForm.value = { name: '', customer_name: '' };
                     createProductDialogVisible.value = true;
                 };
 
                 const createProduct = async () => {
-                    if (!createProductForm.value.name || !createProductForm.value.code) {
-                        ElMessage.warning('请填写产品名称和代号');
+                    if (!createProductForm.value.name || !createProductForm.value.customer_name) {
+                        ElMessage.warning('请填写客户名称和产品名称');
                         return;
                     }
                     try {
@@ -1438,14 +1505,13 @@
                     editProductForm.value = {
                         id: selectedItem.value.data.id,
                         name: selectedItem.value.data.name,
-                        code: selectedItem.value.data.code,
-                        description: selectedItem.value.data.description || ''
+                        customer_name: selectedItem.value.data.customer_name || ''
                     };
                     editProductDialogVisible.value = true;
                 };
                 const saveEditProduct = async () => {
-                    if (!editProductForm.value.name || !editProductForm.value.code) {
-                        ElMessage.warning('产品名称和代号不能为空');
+                    if (!editProductForm.value.name || !editProductForm.value.customer_name) {
+                        ElMessage.warning('客户名称和产品名称不能为空');
                         return;
                     }
                     try {
@@ -1454,18 +1520,20 @@
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
                                 name: editProductForm.value.name,
-                                code: editProductForm.value.code,
-                                description: editProductForm.value.description
+                                customer_name: editProductForm.value.customer_name
                             })
                         });
                         if (res.ok) {
                             const updated = await res.json();
                             selectedItem.value.data.name = updated.name;
-                            selectedItem.value.data.code = updated.code;
-                            selectedItem.value.data.description = updated.description;
+                            selectedItem.value.data.customer_name = updated.customer_name;
+                            const idx = treeData.value.findIndex(p => p.id === updated.id);
+                            if (idx !== -1) {
+                                treeData.value[idx].name = updated.name;
+                                treeData.value[idx].customer_name = updated.customer_name;
+                            }
                             editProductDialogVisible.value = false;
                             ElMessage.success('产品信息已更新');
-                            await fetchProducts();
                         } else {
                             const err = await res.json().catch(() => ({ detail: '更新失败' }));
                             ElMessage.error(err.detail || '更新失败');
@@ -1534,7 +1602,6 @@
                     if (data.type === 'bom_version') {
                         selectedItem.value = { type: 'bom_version', data };
                         bomItems.value = [];
-                        bomVersionDocuments.value = [];
                         aggregatedLogs.value = [];
                         try {
                             const res = await fetch(`${API_BASE}/bom/items/?bom_version_id=${data.id}`);
@@ -1542,13 +1609,6 @@
                             bomItems.value = sanitizeBomItems(await res.json());
                         } catch (e) {
                             ElMessage.error('加载物料清单失败');
-                        }
-                        try {
-                            const res2 = await fetch(`${API_BASE}/bom/versions/${data.id}/documents`);
-                            if (!res2.ok) throw new Error(`HTTP ${res2.status}`);
-                            bomVersionDocuments.value = await res2.json();
-                        } catch (e) {
-                            bomVersionDocuments.value = [];
                         }
                         // 自动加载聚合变更日志
                         try {
@@ -1558,7 +1618,6 @@
                     } else {
                         selectedItem.value = { type: 'product', data };
                         bomItems.value = [];
-                        bomVersionDocuments.value = [];
                         productBomVersions.value = [];
                         try {
                             const res = await fetch(`${API_BASE}/products/${data.id}/documents`);
@@ -1736,57 +1795,6 @@
                             ElMessage.error('网络错误');
                         }
                     }).catch(() => {});
-                };
-
-                const openAddBomVersionDocDialog = () => {
-                    bomVersionDocForm.value = {
-                        title: '',
-                        document_type: '',
-                        update_notes: ''
-                    };
-                    bomVersionDocDialogVisible.value = true;
-                };
-
-                const addBomVersionDoc = async () => {
-                    if (!bomVersionDocForm.value.title) {
-                        ElMessage.warning('请输入记录标题');
-                        return;
-                    }
-                    if (!bomVersionDocForm.value.update_notes) {
-                        ElMessage.warning('请输入变更描述');
-                        return;
-                    }
-                    try {
-                        const bomVersionId = selectedItem.value?.type === 'bom_version' ? selectedItem.value.data.id : null;
-                        if (!bomVersionId) {
-                            ElMessage.error('请先选择一个 BOM 版本');
-                            return;
-                        }
-                        const payload = {
-                            product_id: selectedItem.value.data.product_id,
-                            bom_version_id: bomVersionId,
-                            title: bomVersionDocForm.value.title,
-                            document_type: bomVersionDocForm.value.document_type || 'ecn',
-                            version: '1',
-                            update_notes: bomVersionDocForm.value.update_notes
-                        };
-                        const res = await fetch(`${API_BASE}/documents/`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(payload)
-                        });
-                        if (res.ok) {
-                            ElMessage.success('变更记录保存成功');
-                            bomVersionDocDialogVisible.value = false;
-                            const res2 = await fetch(`${API_BASE}/bom/versions/${bomVersionId}/documents`);
-                            bomVersionDocuments.value = await res2.json();
-                        } else {
-                            const err = await res.json().catch(() => ({ detail: '保存失败' }));
-                            ElMessage.error(err.detail || JSON.stringify(err));
-                        }
-                    } catch (e) {
-                        ElMessage.error('网络错误：' + e.message);
-                    }
                 };
 
                 const saveItem = async () => {
@@ -2213,6 +2221,265 @@
                     } catch (e) { aggregatedLogs.value = []; }
                 };
 
+                const saveChangeLogNote = async (row) => {
+                    if (!row.id) return;
+                    try {
+                        const res = await fetch(`${API_BASE}/bom/changelogs/${row.id}/note`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ manual_note: row.manual_note || '' })
+                        });
+                        if (res.ok) ElMessage.success('备注已保存');
+                    } catch (e) {}
+                };
+
+                const exportEcnToCsv = () => {
+                    if (!aggregatedLogs.value.length) {
+                        ElMessage.warning('暂无数据可导出');
+                        return;
+                    }
+                    let csv = '变更时间,变更物料,系统记录(自动),人工备注\n';
+                    aggregatedLogs.value.forEach(log => {
+                        const time = formatDate(log.created_at);
+                        const itemName = `"${(log.item_name || '') + (log.item_mpn ? ' (' + log.item_mpn + ')' : '')}"`;
+                        const summary = `"${log.change_summary || ''}"`;
+                        const note = `"${(log.manual_note || '').replace(/"/g, '""')}"`;
+                        csv += `${time},${itemName},${summary},${note}\n`;
+                    });
+                    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' });
+                    const link = document.createElement('a');
+                    const versionName = selectedItem.value?.data?.version_code || 'unknown';
+                    link.href = URL.createObjectURL(blob);
+                    link.download = `ECN_报表_${versionName}.csv`;
+                    link.click();
+                    URL.revokeObjectURL(link.href);
+                };
+
+                const loadGanttTasks = async () => {
+                    if (!selectedItem.value || selectedItem.value.type !== 'product') return;
+                    const productId = selectedItem.value.data.id;
+                    try {
+                        const res = await fetch(`${API_BASE}/products/${productId}/gantt-tasks`);
+                        if (res.ok) ganttTasks.value = await res.json();
+                        else ganttTasks.value = [];
+                    } catch (e) { ganttTasks.value = []; }
+                };
+
+                const loadSysHolidays = async () => {
+                    try {
+                        const res = await fetch(`${API_BASE}/sys-holidays`);
+                        if (res.ok) sysHolidays.value = await res.json();
+                        else sysHolidays.value = [];
+                    } catch (e) { sysHolidays.value = []; }
+                };
+
+                const loadTaskTemplates = async () => {
+                    try {
+                        const res = await fetch(`${API_BASE}/task-templates`);
+                        if (res.ok) taskTemplates.value = await res.json();
+                        else taskTemplates.value = [];
+                    } catch (e) { taskTemplates.value = []; }
+                };
+
+                const calculateEndDate = (startDate, duration, isWorkdayOnly) => {
+                    if (!startDate || duration <= 0) return null;
+                    const start = new Date(startDate);
+                    if (isNaN(start.getTime())) return null;
+                    
+                    const holidaySet = new Set(sysHolidays.value.map(h => h.holiday_date));
+                    let current = new Date(start);
+                    let workDaysPassed = 0;
+                    
+                    while (workDaysPassed < duration) {
+                        const dateStr = current.toISOString().split('T')[0];
+                        const dayOfWeek = current.getDay();
+                        
+                        if (isWorkdayOnly) {
+                            if (dayOfWeek !== 0 && dayOfWeek !== 6 && !holidaySet.has(dateStr)) {
+                                workDaysPassed++;
+                            }
+                        } else {
+                            workDaysPassed++;
+                        }
+                        
+                        if (workDaysPassed < duration) {
+                            current.setDate(current.getDate() + 1);
+                        }
+                    }
+                    
+                    return current.toISOString().split('T')[0];
+                };
+
+                const initGantt = () => {
+                    if (!window.Gantt) return;
+                    const container = document.getElementById('gantt-container');
+                    if (!container) return;
+                    if (ganttInstance.value) ganttInstance.value.destroy();
+                    const tasks = ganttTasks.value.map(t => ({
+                        id: t.id,
+                        text: t.text + (t.assignee ? ` (${t.assignee})` : ''),
+                        start_date: t.start_date,
+                        end_date: t.end_date,
+                        progress: t.progress,
+                        dependencies: t.dependencies || ''
+                    }));
+                    ganttInstance.value = new Gantt(container, tasks, {
+                        header_height: 40,
+                        column_width: 60,
+                        step: 24,
+                        view_mode: ganttViewMode.value,
+                        date_format: 'YYYY-MM-DD',
+                        popup_trigger: 'click',
+                        on_click: (task) => {},
+                        on_date_change: async (task, start, end) => {
+                            try {
+                                await fetch(`${API_BASE}/gantt-tasks/${task.id}`, {
+                                    method: 'PUT',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ start_date: start, end_date: end })
+                                });
+                            } catch (e) {}
+                        },
+                        on_progress_change: async (task, progress) => {
+                            try {
+                                await fetch(`${API_BASE}/gantt-tasks/${task.id}`, {
+                                    method: 'PUT',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ progress: progress })
+                                });
+                            } catch (e) {}
+                        },
+                        on_view_change: (mode) => {
+                            ganttViewMode.value = mode;
+                        }
+                    });
+                };
+
+                const refreshGantt = () => {
+                    loadGanttTasks().then(() => {
+                        nextTick(() => { initGantt(); });
+                    });
+                };
+
+                const openAddGanttTaskDialog = () => {
+                    ganttTaskForm.value = {
+                        text: '',
+                        assignee: '',
+                        start_date: '',
+                        duration: 1,
+                        is_workday_only: false,
+                        dependencies: []
+                    };
+                    addGanttTaskDialogVisible.value = true;
+                };
+
+                const addGanttTask = async () => {
+                    if (!ganttTaskForm.value.text) {
+                        ElMessage.warning('请输入任务名称');
+                        return;
+                    }
+                    if (!ganttTaskForm.value.start_date) {
+                        ElMessage.warning('请选择开始日期');
+                        return;
+                    }
+                    if (!selectedItem.value || selectedItem.value.type !== 'product') {
+                        ElMessage.error('请先选择产品');
+                        return;
+                    }
+                    
+                    const endDate = calculateEndDate(
+                        ganttTaskForm.value.start_date,
+                        ganttTaskForm.value.duration,
+                        ganttTaskForm.value.is_workday_only
+                    );
+                    
+                    if (!endDate) {
+                        ElMessage.error('日期计算失败');
+                        return;
+                    }
+                    
+                    try {
+                        const payload = {
+                            product_id: selectedItem.value.data.id,
+                            text: ganttTaskForm.value.text,
+                            assignee: ganttTaskForm.value.assignee || '',
+                            start_date: ganttTaskForm.value.start_date,
+                            end_date: endDate,
+                            duration: ganttTaskForm.value.duration,
+                            is_workday_only: ganttTaskForm.value.is_workday_only,
+                            progress: 0,
+                            dependencies: ganttTaskForm.value.dependencies.join(',')
+                        };
+                        const res = await fetch(`${API_BASE}/gantt-tasks`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload)
+                        });
+                        if (res.ok) {
+                            ElMessage.success('任务创建成功');
+                            addGanttTaskDialogVisible.value = false;
+                            refreshGantt();
+                        } else {
+                            const err = await res.json().catch(() => ({ detail: '创建失败' }));
+                            ElMessage.error(err.detail || JSON.stringify(err));
+                        }
+                    } catch (e) {
+                        ElMessage.error('网络错误：' + e.message);
+                    }
+                };
+
+                const addGanttTaskFromTemplate = (template) => {
+                    if (!selectedItem.value || selectedItem.value.type !== 'product') {
+                        ElMessage.error('请先选择产品');
+                        return;
+                    }
+                    
+                    ganttTaskForm.value.text = template.template_name;
+                    ganttTaskForm.value.duration = template.default_duration || 1;
+                    ganttTaskForm.value.is_workday_only = false;
+                    templateDrawerVisible.value = false;
+                    addGanttTaskDialogVisible.value = true;
+                };
+
+                const addTaskTemplate = async () => {
+                    if (!newTemplateName.value.trim()) {
+                        ElMessage.warning('请输入模板名称');
+                        return;
+                    }
+                    try {
+                        const res = await fetch(`${API_BASE}/task-templates`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                template_name: newTemplateName.value.trim(),
+                                default_duration: newTemplateDuration.value
+                            })
+                        });
+                        if (res.ok) {
+                            ElMessage.success('模板已添加');
+                            newTemplateName.value = '';
+                            newTemplateDuration.value = 1;
+                            addTemplateDialogVisible.value = false;
+                            loadTaskTemplates();
+                        } else {
+                            const err = await res.json().catch(() => ({ detail: '创建失败' }));
+                            ElMessage.error(err.detail || JSON.stringify(err));
+                        }
+                    } catch (e) {
+                        ElMessage.error('网络错误：' + e.message);
+                    }
+                };
+
+                watch(selectedItem, () => {
+                    loadGanttTasks();
+                });
+
+                watch(activeProductTab, (newTab) => {
+                    if (newTab === 'gantt') {
+                        nextTick(() => { initGantt(); });
+                    }
+                });
+
                 // 用 Vue 的 watch 监听 activeBomItems 变化，自动初始化 Sortable
                 watch(activeBomItems, () => {
                     nextTick(() => { initSortable(); });
@@ -2221,6 +2488,8 @@
                 onMounted(() => {
                     checkApiStatus();
                     fetchProducts();
+                    loadSysHolidays();
+                    loadTaskTemplates();
                 });
 
                 return {
@@ -2228,7 +2497,6 @@
                     selectedItem,
                     bomItems,
                     globalDocuments,
-                    bomVersionDocuments,
                     apiStatus,
                     currentTime,
                     treeProps,
@@ -2253,12 +2521,26 @@
                     componentPreviewViewUrl,
                     previewComponent,
                     confirmDeleteBomItem,
-                    bomVersionDocDialogVisible,
-                    bomVersionDocForm,
-                    openAddBomVersionDocDialog,
-                    addBomVersionDoc,
                     aggregatedLogs,
                     loadAggregatedChangelogs,
+                    saveChangeLogNote,
+                    exportEcnToCsv,
+                    activeProductTab,
+                    ganttTasks,
+                    ganttViewMode,
+                    addGanttTaskDialogVisible,
+                    ganttTaskForm,
+                    openAddGanttTaskDialog,
+                    addGanttTask,
+                    refreshGantt,
+                    sysHolidays,
+                    taskTemplates,
+                    templateDrawerVisible,
+                    newTemplateName,
+                    newTemplateDuration,
+                    addGanttTaskFromTemplate,
+                    addTemplateDialogVisible,
+                    addTaskTemplate,
                     createProductDialogVisible,
                     createProductForm,
                     openCreateProductDialog,
