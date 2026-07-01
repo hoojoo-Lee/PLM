@@ -104,24 +104,25 @@ class BOMVersion(Base):
 # =============================================================================
 
 class BOMItem(Base):
-    """BOM 物料明细表 - 强关联 BOM_Version"""
+    """BOM 物料明细表 - 强关联 BOM_Version，支持独立版本控制"""
     __tablename__ = "bom_items"
 
     id = Column(BigInteger, primary_key=True)
     bom_version_id = Column(BigInteger, ForeignKey("bom_versions.id", ondelete="CASCADE"), nullable=False)
-    
-    category = Column(String(50), comment="分类: EE/ME/PKG/Chemical")
-    sub_module = Column(String(50), nullable=True, default='', comment="所属板卡/模块: 主板/电源板/显示板")
-    mpn = Column(String(100), comment="物料编号/MPN")
+
+    category = Column(String(50), comment="分类: 结构件/组装辅件/PCBA/包装件/电子辅件")
+    responsible_party = Column(String(50), nullable=True, default='', comment="责任方: 客户方/NexPCB")
+    mpn = Column(String(100), comment="ERP料号")
     name = Column(String(200), nullable=False, comment="物料名称")
     quantity = Column(Integer, server_default=text("1"), comment="数量")
-    designator = Column(String(100), comment="位号: R1,C2,U3")
-    
+
     responsible = Column(String(100), comment="责任人")
     status = Column(String(20), server_default=text("'pending'"), comment="状态: pending/review/approved/rejected")
-    
-    picture_drive_id = Column(String(100), comment="预览图 Google Drive ID")
-    
+
+    picture_drive_id = Column(String(200), comment="外观预览图标识")
+    design_files = Column(JSON, default=list, comment="设计文件列表: [{file_type, drive_id, version}]")
+    sort_order = Column(Integer, server_default=text("0"), comment="拖拽排序序号")
+
     created_at = Column(DateTime(timezone=True), server_default=text("now()"))
     updated_at = Column(DateTime(timezone=True), server_default=text("now()"), onupdate=datetime.utcnow)
 
@@ -134,20 +135,21 @@ class BOMItem(Base):
 # =============================================================================
 
 class Document(Base):
-    """文档表 - 挂载于 Product 或 BOM_Item"""
+    """文档表 - 挂载于 Product、BOM_Item 或 BOM_Version"""
     __tablename__ = "documents"
 
     id = Column(BigInteger, primary_key=True)
-    
+
     product_id = Column(BigInteger, ForeignKey("products.id", ondelete="CASCADE"), nullable=False)
     bom_item_id = Column(BigInteger, ForeignKey("bom_items.id", ondelete="SET NULL"), comment="为空则为产品级全局文件")
+    bom_version_id = Column(BigInteger, ForeignKey("bom_versions.id", ondelete="SET NULL"), comment="挂载到 BOM 版本（ECN/底层 BOM 文件）")
     
     title = Column(String(300), nullable=False, comment="文档标题")
     document_type = Column(String(50), comment="类型: drawing/spec/test_report/certificate/package/manual")
     
     version = Column(String(20), server_default=text("'1'"), comment="版本号")
     received_date = Column(Date, server_default=text("CURRENT_DATE"), comment="客户下发/输入日期")
-    google_drive_id = Column(String(100), nullable=False, comment="Google Drive 文件 ID")
+    google_drive_id = Column(String(100), nullable=True, comment="Google Drive 文件 ID")
     
     file_name = Column(String(255), comment="原始文件名")
     file_size = Column(BigInteger, comment="文件大小 (bytes)")
@@ -173,19 +175,13 @@ class ChangeLog(Base):
 
     id = Column(BigInteger, primary_key=True)
     
-    product_id = Column(BigInteger, ForeignKey("products.id", ondelete="SET NULL"), comment="关联产品 ID")
-    
     entity_type = Column(String(30), nullable=False, comment="实体类型: Product/BOM/Doc")
     entity_id = Column(BigInteger, nullable=False, comment="实体主键")
     entity_name = Column(String(200), comment="实体名称")
     
-    action = Column(String(20), nullable=False, comment="操作类型: create/update/delete/archive")
-    
-    change_type = Column(String(20), nullable=False, default="modified", comment="变更类型: created/modified/deleted/archived")
-    
-    details = Column(JSON, comment="变更详情 JSON: old_drive_id, new_drive_id, old_version, new_version, update_notes")
-    
+    change_type = Column(String(20), nullable=False, comment="变更类型: create/update/delete/archive")
     change_summary = Column(Text, nullable=False, comment="变更说明")
+    change_detail = Column(String(1000), comment="变更详情")
     
     changed_by = Column(String(100), comment="变更人")
     

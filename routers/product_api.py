@@ -152,6 +152,7 @@ def get_product_changelog(product_id: int, db: Session = Depends(get_db)):
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
     changelogs = db.query(models.ChangeLog).filter(
-        models.ChangeLog.product_id == product_id
+        models.ChangeLog.entity_type == "Product",
+        models.ChangeLog.entity_id == product_id
     ).order_by(models.ChangeLog.created_at.desc()).limit(100).all()
     return changelogs

@@ -147,14 +147,15 @@ class BOMVersionBrief(BaseSchema):
 class BOMItemBase(BaseSchema):
     bom_version_id: int
     category: Optional[str] = Field(None, max_length=50)
-    sub_module: Optional[str] = Field("", max_length=50)
+    responsible_party: Optional[str] = Field("NexPCB", max_length=50)
     mpn: Optional[str] = Field(None, max_length=100)
     name: str = Field(..., max_length=200)
     quantity: int = Field(default=1, ge=0)
-    designator: Optional[str] = Field(None, max_length=100)
     responsible: Optional[str] = Field(None, max_length=100)
     status: str = Field(default="pending")
-    picture_drive_id: Optional[str] = Field(None, max_length=100)
+    picture_drive_id: Optional[str] = Field(None, max_length=200)
+    design_files: Optional[list] = Field(default_factory=list)
+    sort_order: Optional[int] = 0
 
 
 class BOMItemCreate(BOMItemBase):
@@ -164,14 +165,15 @@ class BOMItemCreate(BOMItemBase):
 class BOMItemUpdate(BaseSchema):
     bom_version_id: Optional[int] = None
     category: Optional[str] = Field(None, max_length=50)
-    sub_module: Optional[str] = Field(None, max_length=50)
+    responsible_party: Optional[str] = Field(None, max_length=50)
     mpn: Optional[str] = Field(None, max_length=100)
     name: Optional[str] = Field(None, max_length=200)
     quantity: Optional[int] = Field(None, ge=0)
-    designator: Optional[str] = Field(None, max_length=100)
     responsible: Optional[str] = Field(None, max_length=100)
     status: Optional[str] = None
-    picture_drive_id: Optional[str] = Field(None, max_length=100)
+    picture_drive_id: Optional[str] = Field(None, max_length=200)
+    design_files: Optional[list] = None
+    sort_order: Optional[int] = None
 
 
 class BOMItemResponse(BOMItemBase, TimestampSchema):
@@ -194,11 +196,12 @@ class BOMItemBrief(BaseSchema):
 class DocumentBase(BaseSchema):
     product_id: int
     bom_item_id: Optional[int] = None
+    bom_version_id: Optional[int] = None
     title: str = Field(..., max_length=300)
     document_type: Optional[str] = Field(None, max_length=50)
     version: Optional[str] = Field(default="1", max_length=20)
     received_date: OptionalDate = None
-    google_drive_id: str = Field(..., max_length=100)
+    google_drive_id: Optional[str] = Field(None, max_length=100)
     file_name: Optional[str] = Field(None, max_length=255)
     file_size: Optional[int] = Field(None, ge=0)
     mime_type: Optional[str] = Field(None, max_length=100)
@@ -213,6 +216,7 @@ class DocumentCreate(DocumentBase):
 class DocumentUpdate(BaseSchema):
     product_id: Optional[int] = None
     bom_item_id: Optional[int] = None
+    bom_version_id: Optional[int] = None
     title: Optional[str] = Field(None, max_length=300)
     document_type: Optional[str] = Field(None, max_length=50)
     version: Optional[str] = Field(None, max_length=20)
@@ -243,23 +247,21 @@ class DocumentBrief(BaseSchema):
 # =============================================================================
 
 class ChangeLogBase(BaseSchema):
-    product_id: Optional[int] = None
     entity_type: str = Field(..., max_length=30)
     entity_id: int
     entity_name: Optional[str] = Field(None, max_length=200)
-    action: str = Field(..., max_length=20)
+    change_type: str = Field(..., max_length=20)
     change_summary: str
+    change_detail: Optional[str] = Field(None, max_length=1000)
+    changed_by: Optional[str] = Field(None, max_length=100)
 
 
 class ChangeLogCreate(ChangeLogBase):
-    details: Optional[dict] = None
-    changed_by: Optional[str] = Field(None, max_length=100)
+    pass
 
 
 class ChangeLogResponse(ChangeLogBase):
     id: int
-    details: Optional[dict] = None
-    changed_by: Optional[str] = Field(None, max_length=100)
     created_at: datetime
 
 

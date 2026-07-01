@@ -1,4 +1,10 @@
 from typing import List
+import json
+import os
+import re
+import shutil
+import time
+import uuid
 
 from fastapi import APIRouter, Depends, File, HTTPException, status, UploadFile
 from sqlalchemy.orm import Session
@@ -14,6 +20,8 @@ from schemas import (
     BOMVersionDetailResponse,
     BOMVersionResponse,
     BOMVersionUpdate,
+    ChangeLogResponse,
+    DocumentResponse,
 )
 
 router = APIRouter(prefix="/bom", tags=["BOM"])
@@ -103,6 +111,68 @@ def delete_bom_version(version_id: int, db: Session = Depends(get_db)):
     return None
 
 
+@router.get("/versions/{version_id}/documents", response_model=List[DocumentResponse])
+def get_bom_version_documents(version_id: int, db: Session = Depends(get_db)):
+    version = db.query(models.BOMVersion).get(version_id)
+    if not version:
+        raise HTTPException(status_code=404, detail="BOMVersion not found")
+    documents = db.query(models.Document).filter(
+        models.Document.bom_version_id == version_id
+    ).all()
+    return documents
+
+
+@router.get("/versions/{version_id}/aggregated-changelogs")
+def get_aggregated_changelogs(version_id: int, db: Session = Depends(get_db)):
+    """聚合查询：返回指定 BOM 版本下所有物料的变更日志"""
+    version = db.query(models.BOMVersion).get(version_id)
+    if not version:
+        raise HTTPException(status_code=404, detail="BOMVersion not found")
+
+    # 查出该版本下所有物料 ID
+    item_ids = [row[0] for row in db.query(models.BOMItem.id).filter(
+        models.BOMItem.bom_version_id == version_id
+    ).all()]
+
+    if not item_ids:
+        return []
+
+    # 聚合查询所有关联的变更日志，按时间倒序
+    changelogs = db.query(models.ChangeLog).filter(
+        models.ChangeLog.entity_type == "bom_item",
+        models.ChangeLog.entity_id.in_(item_ids)
+    ).order_by(models.ChangeLog.created_at.desc()).limit(200).all()
+
+    # 构建物料 ID -> (name, mpn) 的映射
+    items = db.query(models.BOMItem).filter(
+        models.BOMItem.id.in_(item_ids)
+    ).all()
+    item_map = {item.id: {"name": item.name, "mpn": item.mpn} for item in items}
+
+    result = []
+    for cl in changelogs:
+        info = item_map.get(cl.entity_id, {"name": "未知", "mpn": "-"})
+        detail = {}
+        if cl.change_detail:
+            try:
+                detail = json.loads(cl.change_detail)
+            except (json.JSONDecodeError, TypeError):
+                detail = {}
+        result.append({
+            "id": cl.id,
+            "created_at": cl.created_at.isoformat() if cl.created_at else None,
+            "change_type": cl.change_type,
+            "change_summary": cl.change_summary,
+            "action": detail.get("action", ""),
+            "item_name": info["name"],
+            "item_mpn": info["mpn"],
+            "item_id": cl.entity_id,
+            "old_version": detail.get("old_version", ""),
+            "new_version": detail.get("new_version", ""),
+        })
+    return result
+
+
 @router.patch("/versions/{version_id}/archive", response_model=BOMVersionResponse)
 def archive_bom_version(version_id: int, db: Session = Depends(get_db)):
     version = db.query(models.BOMVersion).get(version_id)
@@ -152,14 +222,15 @@ def create_bom_item(payload: BOMItemCreate, db: Session = Depends(get_db)):
     bom_item = models.BOMItem(
         bom_version_id=payload.bom_version_id,
         category=payload.category,
-        sub_module=payload.sub_module or '',
+        responsible_party=payload.responsible_party or 'NexPCB',
         mpn=payload.mpn,
         name=payload.name,
         quantity=payload.quantity,
-        designator=payload.designator,
         responsible=payload.responsible,
         status=payload.status,
         picture_drive_id=payload.picture_drive_id,
+        design_files=payload.design_files or [],
+        sort_order=payload.sort_order or 0,
     )
     db.add(bom_item)
     db.commit()
@@ -176,6 +247,17 @@ def list_bom_items(bom_version_id: int | None = None, skip: int = 0, limit: int 
     return items
 
 
+@router.put("/items/reorder", response_model=dict)
+def reorder_bom_items(payload: list[dict], db: Session = Depends(get_db)):
+    """批量更新物料排序 {id, sort_order}"""
+    for item_data in payload:
+        item = db.query(models.BOMItem).get(item_data.get("id"))
+        if item:
+            item.sort_order = item_data.get("sort_order", 0)
+    db.commit()
+    return {"status": "ok"}
+
+
 @router.get("/items/{item_id}", response_model=BOMItemResponse)
 def get_bom_item(item_id: int, db: Session = Depends(get_db)):
     item = db.query(models.BOMItem).get(item_id)
@@ -189,6 +271,10 @@ def update_bom_item(item_id: int, payload: BOMItemUpdate, db: Session = Depends(
     item = db.query(models.BOMItem).get(item_id)
     if not item:
         raise HTTPException(status_code=404, detail="BOMItem not found")
+
+    old_picture_id = item.picture_drive_id
+    old_design_files = item.design_files or []
+
     if payload.bom_version_id is not None:
         bom_version = db.query(models.BOMVersion).get(payload.bom_version_id)
         if not bom_version:
@@ -196,26 +282,173 @@ def update_bom_item(item_id: int, payload: BOMItemUpdate, db: Session = Depends(
         item.bom_version_id = payload.bom_version_id
     if payload.category is not None:
         item.category = payload.category
-    if payload.sub_module is not None:
-        item.sub_module = payload.sub_module
+    if payload.responsible_party is not None:
+        item.responsible_party = payload.responsible_party
     if payload.mpn is not None:
         item.mpn = payload.mpn
     if payload.name is not None:
         item.name = payload.name
     if payload.quantity is not None:
         item.quantity = payload.quantity
-    if payload.designator is not None:
-        item.designator = payload.designator
     if payload.responsible is not None:
         item.responsible = payload.responsible
     if payload.status is not None:
         item.status = payload.status
     if payload.picture_drive_id is not None:
-        item.picture_drive_id = payload.picture_drive_id
-    db.add(item)
-    db.commit()
-    db.refresh(item)
+        new_picture_id = _extract_drive_id(payload.picture_drive_id)
+        item.picture_drive_id = new_picture_id
+    if payload.design_files is not None:
+        item.design_files = payload.design_files
+    if payload.sort_order is not None:
+        item.sort_order = payload.sort_order
+
+    try:
+        db.add(item)
+        db.commit()
+        db.refresh(item)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"更新失败: {str(e)}")
+
+    # 精准日志：预览图变更
+    if payload.picture_drive_id is not None and old_picture_id != item.picture_drive_id:
+        changelog = models.ChangeLog(
+            entity_type="bom_item",
+            entity_id=item.id,
+            entity_name=item.name,
+            change_type="update",
+            change_summary=f"更新预览图: {item.name}",
+            change_detail=json.dumps({"action": "update_picture", "old_picture_id": old_picture_id, "new_picture_id": item.picture_drive_id}),
+        )
+        db.add(changelog)
+        db.commit()
+
+    # 精准日志：design_files 差异对比
+    if payload.design_files is not None:
+        new_design_files = payload.design_files
+        old_map = {f.get("file_type"): f for f in old_design_files}
+        new_map = {f.get("file_type"): f for f in new_design_files}
+
+        for ft, new_file in new_map.items():
+            old_file = old_map.get(ft)
+            if old_file is None:
+                # 新增设计文件
+                changelog = models.ChangeLog(
+                    entity_type="bom_item",
+                    entity_id=item.id,
+                    entity_name=item.name,
+                    change_type="update",
+                    change_summary=f"新增设计文件: {item.name} - {ft}",
+                    change_detail=json.dumps({"action": "add_design_file", "file_type": ft, "drive_id": new_file.get("drive_id"), "version": new_file.get("version")}),
+                )
+                db.add(changelog)
+            elif old_file.get("drive_id") != new_file.get("drive_id"):
+                # 设计文件替换（精准追溯）
+                changelog = models.ChangeLog(
+                    entity_type="bom_item",
+                    entity_id=item.id,
+                    entity_name=item.name,
+                    change_type="update",
+                    change_summary=f"设计文件升版: {item.name} - {ft} {old_file.get('version','')} -> {new_file.get('version','')}",
+                    change_detail=json.dumps({
+                        "action": "update_design_file",
+                        "file_type": ft,
+                        "old_drive_id": old_file.get("drive_id"),
+                        "new_drive_id": new_file.get("drive_id"),
+                        "old_version": old_file.get("version"),
+                        "new_version": new_file.get("version"),
+                    }),
+                )
+                db.add(changelog)
+
+        # 检查被删除的文件类型
+        for ft in old_map:
+            if ft not in new_map:
+                changelog = models.ChangeLog(
+                    entity_type="bom_item",
+                    entity_id=item.id,
+                    entity_name=item.name,
+                    change_type="update",
+                    change_summary=f"删除设计文件: {item.name} - {ft}",
+                    change_detail=json.dumps({"action": "remove_design_file", "file_type": ft}),
+                )
+                db.add(changelog)
+
+        db.commit()
+
     return item
+
+
+@router.get("/items/{item_id}/changelog", response_model=List[ChangeLogResponse])
+def get_bom_item_changelog(item_id: int, db: Session = Depends(get_db)):
+    item = db.query(models.BOMItem).get(item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="BOMItem not found")
+    changelogs = db.query(models.ChangeLog).filter(
+        models.ChangeLog.entity_type == "bom_item",
+        models.ChangeLog.entity_id == item_id
+    ).order_by(models.ChangeLog.created_at.desc()).limit(50).all()
+    return changelogs
+
+
+def _extract_drive_id(input_str: str) -> str:
+    if not input_str:
+        return ''
+    trimmed = input_str.strip()
+    file_d_regex = re.compile(r'/file/d/([-\w]+)')
+    open_id_regex = re.compile(r'/open\?id=([-\w]+)')
+    query_id_regex = re.compile(r'[?&]id=([-\w]+)')
+    match = file_d_regex.search(trimmed) or open_id_regex.search(trimmed) or query_id_regex.search(trimmed)
+    if match:
+        return match.group(1)
+    long_match = re.search(r'[-\w]{25,}', trimmed)
+    if long_match:
+        return long_match.group(0)
+    return trimmed
+
+
+@router.post("/items/{item_id}/upload-picture", response_model=BOMItemResponse)
+def upload_bom_item_picture(item_id: int, file: UploadFile = File(...), db: Session = Depends(get_db)):
+    item = db.query(models.BOMItem).get(item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="BOMItem not found")
+
+    try:
+        upload_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")
+        os.makedirs(upload_dir, exist_ok=True)
+
+        # 生成唯一文件名防止覆盖
+        ext = os.path.splitext(file.filename or "image.png")[1] or ".png"
+        filename = f"{int(time.time())}_{item_id}{ext}"
+        file_path = os.path.join(upload_dir, filename)
+
+        # 保存物理文件
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        # 更新数据库，存入相对路径
+        old_picture_id = item.picture_drive_id
+        relative_path = f"/uploads/{filename}"
+        item.picture_drive_id = relative_path
+        db.add(item)
+        db.commit()
+        db.refresh(item)
+
+        changelog = models.ChangeLog(
+            entity_type="bom_item",
+            entity_id=item.id,
+            entity_name=item.name,
+            change_type="update",
+            change_summary=f"更新预览图: {item.name}",
+            change_detail=json.dumps({"action": "update_picture", "old_picture_id": old_picture_id, "new_picture_id": relative_path, "filename": filename}),
+        )
+        db.add(changelog)
+        db.commit()
+
+        return item
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"图片上传失败: {str(e)}")
 
 
 @router.delete("/items/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -240,13 +473,14 @@ def create_bom_items_batch(bom_version_id: int, items: List[BOMItemCreate], db: 
         bom_item = models.BOMItem(
             bom_version_id=payload.bom_version_id,
             category=payload.category,
+            responsible_party=payload.responsible_party or 'NexPCB',
             mpn=payload.mpn,
             name=payload.name,
             quantity=payload.quantity,
-            designator=payload.designator,
             responsible=payload.responsible,
             status=payload.status,
             picture_drive_id=payload.picture_drive_id,
+            design_files=payload.design_files or [],
         )
         db.add(bom_item)
         created_items.append(bom_item)
@@ -260,191 +494,108 @@ def create_bom_items_batch(bom_version_id: int, items: List[BOMItemCreate], db: 
 
 @router.post("/import/{bom_version_id}", response_model=dict, status_code=status.HTTP_201_CREATED)
 def import_bom_from_excel(bom_version_id: int, file: UploadFile = File(...), db: Session = Depends(get_db)):
-    """
-    智能解析 Excel BOM 文件并批量导入
-    
-    特性：
-    1. 智能表头寻找：自动识别真实表头行（跳过项目信息描述行）
-    2. 列名模糊匹配：支持中英文多种列名写法
-    3. 全局异常捕获：友好返回 400 错误而非 500
-    """
     bom_version = db.query(models.BOMVersion).get(bom_version_id)
     if not bom_version:
         raise HTTPException(status_code=404, detail="BOMVersion not found")
     
     allowed_extensions = ['.xlsx', '.xls', '.csv']
-    filename = file.filename.lower() if file.filename else ''
+    filename = file.filename.lower()
     if not any(filename.endswith(ext) for ext in allowed_extensions):
-        raise HTTPException(status_code=400, detail="仅支持 Excel (.xlsx, .xls) 或 CSV 文件格式")
+        raise HTTPException(status_code=400, detail="Only Excel (.xlsx, .xls) or CSV files are allowed")
     
     try:
-        from io import BytesIO
-        import pandas as pd
-        
-        file_content = file.file.read()
-        file_bytes = BytesIO(file_content)
-        
-        # =========================================================================
-        # Step 1: 智能寻找表头行 (Header Row Detection)
-        # =========================================================================
-        header_row_index = 0  # 默认表头在第 0 行
-        
-        if not filename.endswith('.csv'):
-            # 先读取整个文件，不带表头
-            try:
-                df_raw = pd.read_excel(file_bytes, header=None, engine='openpyxl', dtype=str)
-            except Exception as read_err:
-                raise HTTPException(status_code=400, detail=f"Excel 文件读取失败: {str(read_err)}")
-            
-            # 遍历前 20 行，查找包含核心 BOM 关键字的行
-            mpn_keywords = ['mpn', 'part number', 'partnumber', 'mfg part number', '制造料号', '料号', '物料编号', 'pn']
-            designator_keywords = ['designator', 'reference', 'ref', 'ref des', '位号', '位置', '参考']
-            
-            for row_idx in range(min(20, len(df_raw))):
-                row_values = df_raw.iloc[row_idx].astype(str).str.lower().str.strip()
-                row_text = ' '.join(row_values.tolist())
-                
-                # 检查是否同时包含 MPN 和 Designator 相关关键字
-                has_mpn_keyword = any(kw in row_text for kw in mpn_keywords)
-                has_designator_keyword = any(kw in row_text for kw in designator_keywords)
-                
-                if has_mpn_keyword and has_designator_keyword:
-                    header_row_index = row_idx
-                    break
-        
-        # =========================================================================
-        # Step 2: 重新读取文件，使用正确的表头行
-        # =========================================================================
-        file_bytes.seek(0)  # 重置文件指针
-        
         if filename.endswith('.csv'):
-            df = pd.read_csv(file_bytes, dtype=str)
+            import csv
+            content = file.file.read().decode('utf-8').strip()
+            lines = content.split('\n')
+            reader = csv.DictReader(lines)
+            rows = list(reader)
         else:
-            df = pd.read_excel(file_bytes, header=header_row_index, engine='openpyxl', dtype=str)
+            from io import BytesIO
+            import openpyxl
+            wb = openpyxl.load_workbook(BytesIO(file.file.read()), data_only=True)
+            ws = wb.active
+            headers = [cell.value for cell in ws[1]]
+            rows = []
+            for row in ws.iter_rows(min_row=2, values_only=True):
+                if all(cell is None for cell in row):
+                    continue
+                rows.append(dict(zip(headers, row)))
         
-        # 清理数据
-        df = df.dropna(how='all')  # 删除全空行
-        df = df.fillna('')  # 空值填充为空字符串
-        
-        # 清理列名：去除首尾空格、换行符
-        df.columns = [str(col).strip().replace('\n', '').replace('\r', '') for col in df.columns]
-        
-        # =========================================================================
-        # Step 3: 增强的列名模糊匹配
-        # =========================================================================
         column_mapping = {
-            'mpn': ['mpn', 'part number', 'partnumber', 'mfg part number', '制造料号', '料号', '物料编号', 'pn', 'manufacturer part number', '厂商料号'],
-            'designator': ['designator', 'reference', 'ref', 'ref des', '位号', '位置', '参考', 'ref designator', 'reference designator'],
-            'quantity': ['quantity', 'qty', '用量', '数量', 'count', 'amount', 'qty per unit', '每台用量'],
-            'name': ['name', 'description', '名称', '描述', '规格', 'specification', 'spec', 'part name', '物料名称', '品名'],
-            'category': ['category', '分类', '类型', '类别', 'type', 'item type', '物料分类'],
-            'responsible': ['responsible', '负责人', '责任人', 'owner', '采购负责人', 'engineer'],
-            'status': ['status', '状态', '物料状态', 'item status', 'lifecycle status'],
-            'picture_drive_id': ['picture_drive_id', '图片', 'drive id', 'google drive id', 'image id', '图片链接', 'photo'],
+            'mpn': ['mpn', '料号', '物料编号', 'part number', 'pn', '编号'],
+            'name': ['name', '物料名称', '名称', '品名', 'description', '描述'],
+            'quantity': ['quantity', '数量', '用量', 'qty'],
+            'category': ['category', '分类', '类别', '类型'],
+            'responsible_party': ['responsible_party', '责任方', '模块', '板卡', '所属板卡', '所属模块'],
+            'responsible': ['responsible', '负责人', '责任人'],
+            'status': ['status', '状态'],
         }
         
-        def find_column_mapping(df_columns, candidates):
-            """模糊匹配列名"""
-            for df_col in df_columns:
-                col_lower = str(df_col).lower().strip()
-                for candidate in candidates:
-                    candidate_lower = candidate.lower().strip()
-                    # 完全匹配或包含匹配
-                    if col_lower == candidate_lower or candidate_lower in col_lower or col_lower in candidate_lower:
-                        return df_col
+        def find_column(header, candidates):
+            if not header:
+                return None
+            h = str(header).strip().lower()
+            for candidate in candidates:
+                if candidate.lower() in h or h in candidate.lower():
+                    return h
             return None
         
         col_indices = {}
-        for key, candidates in column_mapping.items():
-            matched_col = find_column_mapping(df.columns, candidates)
-            if matched_col:
-                col_indices[key] = matched_col
+        if rows:
+            first_row = rows[0]
+            for key, candidates in column_mapping.items():
+                for header in first_row.keys():
+                    if find_column(header, candidates):
+                        col_indices[key] = header
+                        break
         
-        # 检查必填列是否存在
-        if 'mpn' not in col_indices:
-            raise HTTPException(
-                status_code=400, 
-                detail=f"BOM 解析失败：未找到 MPN（料号）列。请确保 Excel 表头包含以下关键字之一：{column_mapping['mpn']}。当前识别到的列名：{list(df.columns)}"
-            )
-        
-        # =========================================================================
-        # Step 4: 批量导入物料
-        # =========================================================================
         created_count = 0
         skipped_count = 0
-        warnings = []
         
-        for idx, row in df.iterrows():
-            try:
-                mpn = str(row.get(col_indices.get('mpn'), '')).strip()
-                
-                if not mpn:
-                    skipped_count += 1
-                    if len(warnings) < 10:
-                        warnings.append(f"第 {idx + header_row_index + 2} 行: 缺少必填项 MPN（料号），已跳过")
-                    continue
-                
-                name = str(row.get(col_indices.get('name', col_indices.get('mpn')), '')).strip()
-                if not name:
-                    name = mpn
-                
-                quantity_val = row.get(col_indices.get('quantity'))
-                try:
-                    quantity = int(float(quantity_val)) if quantity_val and str(quantity_val).strip() else 1
-                except (ValueError, TypeError):
-                    quantity = 1
-                
-                designator = str(row.get(col_indices.get('designator'), '')).strip()
-                category = str(row.get(col_indices.get('category'), '')).strip()
-                responsible = str(row.get(col_indices.get('responsible'), '')).strip()
-                status_val = str(row.get(col_indices.get('status'), '')).strip().lower() or 'engineering'
-                picture_drive_id = str(row.get(col_indices.get('picture_drive_id'), '')).strip()
-                
-                bom_item = models.BOMItem(
-                    bom_version_id=bom_version_id,
-                    category=category,
-                    mpn=mpn,
-                    name=name,
-                    quantity=quantity,
-                    designator=designator,
-                    responsible=responsible,
-                    status=status_val,
-                    picture_drive_id=picture_drive_id,
-                )
-                db.add(bom_item)
-                created_count += 1
-                
-            except Exception as row_err:
+        for row in rows:
+            mpn = str(row.get(col_indices.get('mpn'))).strip() if col_indices.get('mpn') else ''
+            name = str(row.get(col_indices.get('name'))).strip() if col_indices.get('name') else ''
+            
+            if not mpn and not name:
                 skipped_count += 1
-                if len(warnings) < 10:
-                    warnings.append(f"第 {idx + header_row_index + 2} 行解析失败: {str(row_err)}")
+                continue
+            
+            quantity = row.get(col_indices.get('quantity'))
+            try:
+                quantity = int(quantity) if quantity else 1
+            except ValueError:
+                quantity = 1
+            
+            category = str(row.get(col_indices.get('category'))).strip() if col_indices.get('category') else ''
+            responsible_party = str(row.get(col_indices.get('responsible_party'))).strip() if col_indices.get('responsible_party') else ''
+            responsible = str(row.get(col_indices.get('responsible'))).strip() if col_indices.get('responsible') else ''
+            status = str(row.get(col_indices.get('status'))).strip() if col_indices.get('status') else 'pending'
+            
+            if not name:
+                name = mpn
+            
+            bom_item = models.BOMItem(
+                bom_version_id=bom_version_id,
+                category=category,
+                responsible_party=responsible_party,
+                mpn=mpn,
+                name=name,
+                quantity=quantity,
+                responsible=responsible,
+                status=status,
+            )
+            db.add(bom_item)
+            created_count += 1
         
         db.commit()
         
-        result = {
+        return {
             'message': f'BOM 导入成功',
             'created_count': created_count,
             'skipped_count': skipped_count,
-            'header_row_index': header_row_index,
             'column_mapping': col_indices,
-            'detected_columns': list(df.columns),
         }
-        
-        if warnings:
-            result['warnings'] = warnings
-        
-        return result
-    
-    except ImportError as e:
-        raise HTTPException(status_code=400, detail=f"缺少依赖库，请安装 pandas 和 openpyxl: {str(e)}")
-    
-    except HTTPException:
-        # 已经是 HTTPException，直接抛出
-        raise
     
     except Exception as e:
-        db.rollback()
-        raise HTTPException(
-            status_code=400, 
-            detail=f"BOM 解析失败，请检查 Excel 格式。系统报错信息: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"导入失败: {str(e)}")

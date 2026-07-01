@@ -1,6 +1,8 @@
 from contextlib import asynccontextmanager
+import os
 
 from fastapi import Depends, FastAPI
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 
 from database import Base, engine, get_db
@@ -49,3 +51,8 @@ app.include_router(product_router)
 app.include_router(project_router)
 app.include_router(bom_router)
 app.include_router(document_router)
+
+# 挂载静态文件目录，用于本地图片上传
+upload_dir = os.path.join(os.path.dirname(__file__), "uploads")
+os.makedirs(upload_dir, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=upload_dir), name="uploads")
