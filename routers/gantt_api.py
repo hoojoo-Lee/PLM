@@ -16,7 +16,7 @@ def get_gantt_tasks(product_id: int, db: Session = Depends(get_db)):
     for task in tasks:
         result.append({
             "id": task.id,
-            "text": task.task_text,
+            "text": task.text,
             "start_date": str(task.start_date),
             "end_date": str(task.end_date),
             "duration": task.duration,
@@ -24,6 +24,7 @@ def get_gantt_tasks(product_id: int, db: Session = Depends(get_db)):
             "progress": task.progress,
             "dependencies": task.dependencies,
             "assignee": task.assignee,
+            "remark": task.remark or "",
             "created_at": task.created_at.isoformat() if task.created_at else None
         })
     return result
@@ -41,14 +42,15 @@ def create_gantt_task(payload: dict, db: Session = Depends(get_db)):
     
     task = models.GanttTask(
         product_id=product_id,
-        task_text=payload.get("text", ""),
+        text=payload.get("text", ""),
         start_date=payload.get("start_date"),
         end_date=payload.get("end_date"),
         duration=payload.get("duration", 1),
         is_workday_only=payload.get("is_workday_only", False),
         progress=payload.get("progress", 0),
         dependencies=payload.get("dependencies", ""),
-        assignee=payload.get("assignee", "")
+        assignee=payload.get("assignee", ""),
+        remark=payload.get("remark", "")
     )
     db.add(task)
     db.commit()
@@ -56,7 +58,7 @@ def create_gantt_task(payload: dict, db: Session = Depends(get_db)):
     
     return {
         "id": task.id,
-        "text": task.task_text,
+        "text": task.text,
         "start_date": str(task.start_date),
         "end_date": str(task.end_date),
         "duration": task.duration,
@@ -64,6 +66,7 @@ def create_gantt_task(payload: dict, db: Session = Depends(get_db)):
         "progress": task.progress,
         "dependencies": task.dependencies,
         "assignee": task.assignee,
+        "remark": task.remark or "",
         "product_id": task.product_id,
         "created_at": task.created_at.isoformat() if task.created_at else None
     }
@@ -76,7 +79,7 @@ def update_gantt_task(task_id: int, payload: dict, db: Session = Depends(get_db)
         raise HTTPException(status_code=404, detail="Task not found")
     
     if "text" in payload:
-        task.task_text = payload["text"]
+        task.text = payload["text"]
     if "start_date" in payload:
         task.start_date = payload["start_date"]
     if "end_date" in payload:
@@ -91,6 +94,8 @@ def update_gantt_task(task_id: int, payload: dict, db: Session = Depends(get_db)
         task.dependencies = payload["dependencies"]
     if "assignee" in payload:
         task.assignee = payload["assignee"]
+    if "remark" in payload:
+        task.remark = payload["remark"]
     
     db.add(task)
     db.commit()
@@ -98,7 +103,7 @@ def update_gantt_task(task_id: int, payload: dict, db: Session = Depends(get_db)
     
     return {
         "id": task.id,
-        "text": task.task_text,
+        "text": task.text,
         "start_date": str(task.start_date),
         "end_date": str(task.end_date),
         "duration": task.duration,
@@ -106,6 +111,7 @@ def update_gantt_task(task_id: int, payload: dict, db: Session = Depends(get_db)
         "progress": task.progress,
         "dependencies": task.dependencies,
         "assignee": task.assignee,
+        "remark": task.remark or "",
         "product_id": task.product_id,
         "created_at": task.created_at.isoformat() if task.created_at else None
     }

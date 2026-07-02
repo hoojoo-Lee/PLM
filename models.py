@@ -197,20 +197,18 @@ class GanttTask(Base):
     """甘特图任务模型"""
     __tablename__ = "gantt_tasks"
 
-    id = Column(BigInteger, primary_key=True)
-    product_id = Column(BigInteger, ForeignKey("products.id"), nullable=False, index=True)
-    
-    task_text = Column(String(200), nullable=False, comment="任务名称")
-    start_date = Column(Date, nullable=False, comment="开始日期")
-    end_date = Column(Date, nullable=False, comment="结束日期")
-    duration = Column(Integer, default=1, comment="持续天数")
-    is_workday_only = Column(Boolean, default=False, comment="是否仅工作日")
-    progress = Column(Float, default=0, comment="进度 0-1")
-    
-    dependencies = Column(String(500), default="", comment="紧前依赖任务ID，逗号分隔")
-    assignee = Column(String(100), default="", comment="负责人")
-    
-    created_at = Column(DateTime(timezone=True), server_default=text("now()"))
+    id = Column(Integer, primary_key=True, index=True)
+    product_id = Column(Integer, index=True)
+    text = Column(String, nullable=False)
+    start_date = Column(DateTime, nullable=False)
+    end_date = Column(DateTime, nullable=False)
+    duration = Column(Integer, default=1)
+    is_workday_only = Column(Boolean, default=True)
+    progress = Column(Float, default=0.0)
+    dependencies = Column(String, default="[]")
+    assignee = Column(String, default="")
+    remark = Column(String, default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 class SysHoliday(Base):

@@ -273,12 +273,15 @@ class ChangeLogResponse(ChangeLogBase):
 # =============================================================================
 
 class GanttTaskBase(BaseSchema):
-    task_text: str = Field(..., max_length=200)
-    start_date: date
-    end_date: date
-    progress: float = Field(0, ge=0, le=1)
-    dependencies: Optional[str] = ""
+    text: str = Field(..., max_length=200)
+    start_date: datetime
+    end_date: datetime
+    duration: int = 1
+    is_workday_only: bool = True
+    progress: float = Field(0.0, ge=0, le=1)
+    dependencies: Optional[str] = "[]"
     assignee: Optional[str] = Field("", max_length=100)
+    remark: Optional[str] = Field("", max_length=500)
 
 
 class GanttTaskCreate(GanttTaskBase):
@@ -287,11 +290,14 @@ class GanttTaskCreate(GanttTaskBase):
 
 class GanttTaskUpdate(BaseSchema):
     text: Optional[str] = None
-    start_date: Optional[date] = None
-    end_date: Optional[date] = None
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
+    duration: Optional[int] = None
+    is_workday_only: Optional[bool] = None
     progress: Optional[float] = None
     dependencies: Optional[str] = None
     assignee: Optional[str] = None
+    remark: Optional[str] = None
 
 
 class GanttTaskResponse(GanttTaskBase):

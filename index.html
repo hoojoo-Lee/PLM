@@ -284,12 +284,12 @@
                                             <el-button type="primary" size="small" @click="openAddGanttTaskDialog">
                                                 <el-icon><Plus class="w-4 h-4 mr-1" /></el-icon>极速新增任务
                                             </el-button>
-                                            <el-button type="info" @click="templateDrawerVisible = true">
-                                                <el-icon><Menu /></el-icon>任务模板库
+                                            <el-button type="info" plain @click="templateDrawerVisible = true">
+                                                <el-icon class="mr-1"><Menu /></el-icon> 任务模板库
                                             </el-button>
                                         </div>
                                     </div>
-                                    <div id="gantt-container" class="bg-white rounded-lg border border-gray-200"></div>
+                                    <div id="gantt-container" class="bg-white rounded-lg border border-gray-200" style="min-height: 500px; width: 100%; overflow-x: auto;"></div>
                                 </div>
                             </el-tab-pane>
                         </el-tabs>
@@ -971,10 +971,13 @@
             </template>
         </el-dialog>
 
-        <el-dialog v-model="addGanttTaskDialogVisible" title="极速新增任务" width="500px">
+        <el-dialog v-model="addGanttTaskDialogVisible" :title="ganttTaskForm.id ? '编辑任务' : '极速新增任务'" width="500px">
             <el-form :model="ganttTaskForm" label-width="100px">
                 <el-form-item label="任务名称" required>
                     <el-input v-model="ganttTaskForm.text" placeholder="如：结构件开模" />
+                </el-form-item>
+                <el-form-item label="任务备注">
+                    <el-input v-model="ganttTaskForm.remark" placeholder="优先展示此备注，如不填则展示原模块名" />
                 </el-form-item>
                 <el-form-item label="负责人">
                     <el-input v-model="ganttTaskForm.assignee" placeholder="输入负责人姓名" />
@@ -991,34 +994,33 @@
                 </el-form-item>
                 <el-form-item label="紧前依赖">
                     <el-select v-model="ganttTaskForm.dependencies" multiple placeholder="选择紧前任务（可选）">
-                        <el-option v-for="task in ganttTasks.value" :key="task.id" :label="task.text" :value="task.id" />
+                        <el-option v-for="task in ganttTasks" :key="task.id" :label="task.remark || task.text" :value="task.id" />
                     </el-select>
                 </el-form-item>
             </el-form>
             <template #footer>
                 <el-button @click="addGanttTaskDialogVisible = false">取消</el-button>
-                <el-button type="primary" @click="addGanttTask">确认创建</el-button>
+                <el-button type="primary" @click="ganttTaskForm.id ? saveEditGanttTask() : addGanttTask()">{{ ganttTaskForm.id ? '保存修改' : '确认创建' }}</el-button>
             </template>
         </el-dialog>
 
-        <el-drawer v-model="templateDrawerVisible" title="🛠️ 任务模板库 (点击派发)" size="300px">
-            <div class="template-list p-2">
-                <el-alert title="像点菜一样点击下方卡片，即可快速添加到甘特图" type="success" :closable="false" class="mb-4" />
-
+        <el-drawer v-model="templateDrawerVisible" title="任务模板库" size="50%">
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
                 <el-card
                     v-for="tpl in taskTemplates"
                     :key="tpl.id"
                     shadow="hover"
-                    class="mb-3 cursor-pointer border-l-4 border-blue-500 hover:bg-blue-50 transition-colors"
+                    class="cursor-pointer border-l-4 border-blue-500 hover:bg-blue-50 transition-colors h-full"
                     @click="addGanttTaskFromTemplate(tpl)"
+                    :body-style="{ padding: '12px' }"
                 >
-                    <div class="font-bold text-gray-700">{{ tpl.template_name }}</div>
-                    <div class="text-xs text-gray-400 mt-1">默认耗时: {{ tpl.default_duration || 1 }} 天</div>
+                    <div class="font-bold text-gray-700 truncate" :title="tpl.template_name || tpl.name">{{ tpl.template_name || tpl.name }}</div>
+                    <div class="text-xs text-gray-400 mt-2">默认耗时: {{ tpl.default_duration || 1 }} 天</div>
                 </el-card>
-
-                <el-divider>自定义</el-divider>
-                <el-button class="w-full" plain type="primary" @click="addTemplateDialogVisible = true">+ 添加新模板</el-button>
             </div>
+
+            <el-divider>自定义新模板</el-divider>
+            <el-button class="w-full" plain type="primary" @click="addTemplateDialogVisible = true" icon="Plus">添加新模板</el-button>
         </el-drawer>
 
         <el-dialog v-model="addTemplateDialogVisible" title="添加新模板" width="400px">
@@ -1044,6 +1046,21 @@
 
         const API_BASE = 'http://127.0.0.1:8080';
 
+        const handleApiError = async (response) => {
+            if (!response.ok) {
+                let errorMsg = `请求失败 (状态码: ${response.status})`;
+                try {
+                    const errorData = await response.json();
+                    errorMsg = errorData.detail || errorData.message || errorMsg;
+                } catch (e) {
+                    console.error("无法解析后端错误详情:", e);
+                }
+                ElMessage.error(`系统异常: ${errorMsg}`);
+                throw new Error(errorMsg);
+            }
+            return response;
+        };
+
         const app = createApp({
             setup() {
                 const treeData = ref([]);
@@ -1058,7 +1075,9 @@
                 const ganttInstance = ref(null);
                 const addGanttTaskDialogVisible = ref(false);
                 const ganttTaskForm = ref({
+                    id: null,
                     text: '',
+                    remark: '',
                     assignee: '',
                     start_date: '',
                     duration: 1,
@@ -1205,14 +1224,10 @@
                             method: 'POST',
                             body: formData
                         });
-                        
-                        if (response.ok) {
-                            const result = await response.json();
-                            onSuccess(result);
-                        } else {
-                            const errorData = await response.json().catch(() => ({}));
-                            onError(new Error(errorData.detail || '上传失败'));
-                        }
+
+                        await handleApiError(response);
+                        const result = await response.json();
+                        onSuccess(result);
                     } catch (e) {
                         onError(e);
                     }
@@ -1312,9 +1327,9 @@
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify(reorderData),
                         });
-                        if (!res.ok) throw new Error('保存排序失败');
+                        await handleApiError(res);
                         ElMessage.success('排序已保存');
-                    } catch (e) { ElMessage.error(e.message); }
+                    } catch (e) { console.error("操作中断:", e); }
                 };
 
                 const openImportDialog = () => {
@@ -1398,11 +1413,7 @@
                             body: formData,
                         });
 
-                        if (!response.ok) {
-                            const errorData = await response.json().catch(() => ({}));
-                            throw new Error(errorData.detail || `HTTP ${response.status}`);
-                        }
-
+                        await handleApiError(response);
                         const result = await response.json();
                         ElMessage.success('图片更新成功！');
 
@@ -1410,8 +1421,7 @@
                         item.picture_drive_id = result.picture_drive_id;
 
                     } catch (error) {
-                        console.error('图片上传异常:', error);
-                        ElMessage.error(`上传失败: ${error.message}`);
+                        console.error('操作中断:', error);
                     }
                 };
 
@@ -1487,16 +1497,12 @@
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify(createProductForm.value)
                         });
-                        if (res.ok) {
-                            ElMessage.success('产品创建成功');
-                            createProductDialogVisible.value = false;
-                            await fetchProducts();
-                        } else {
-                            const err = await res.json().catch(() => ({ detail: '创建失败' }));
-                            ElMessage.error(err.detail || '创建失败');
-                        }
+                        await handleApiError(res);
+                        ElMessage.success('产品创建成功');
+                        createProductDialogVisible.value = false;
+                        await fetchProducts();
                     } catch (e) {
-                        ElMessage.error('网络错误');
+                        console.error("操作中断:", e);
                     }
                 };
 
@@ -1523,22 +1529,20 @@
                                 customer_name: editProductForm.value.customer_name
                             })
                         });
-                        if (res.ok) {
-                            const updated = await res.json();
-                            selectedItem.value.data.name = updated.name;
-                            selectedItem.value.data.customer_name = updated.customer_name;
-                            const idx = treeData.value.findIndex(p => p.id === updated.id);
-                            if (idx !== -1) {
-                                treeData.value[idx].name = updated.name;
-                                treeData.value[idx].customer_name = updated.customer_name;
-                            }
-                            editProductDialogVisible.value = false;
-                            ElMessage.success('产品信息已更新');
-                        } else {
-                            const err = await res.json().catch(() => ({ detail: '更新失败' }));
-                            ElMessage.error(err.detail || '更新失败');
+                        await handleApiError(res);
+                        const updated = await res.json();
+                        selectedItem.value.data.name = updated.name;
+                        selectedItem.value.data.customer_name = updated.customer_name;
+                        const idx = treeData.value.findIndex(p => p.id === updated.id);
+                        if (idx !== -1) {
+                            treeData.value[idx].name = updated.name;
+                            treeData.value[idx].customer_name = updated.customer_name;
                         }
-                    } catch (e) { ElMessage.error('网络错误'); }
+                        editProductDialogVisible.value = false;
+                        ElMessage.success('产品信息已更新');
+                    } catch (e) {
+                        console.error("操作中断:", e);
+                    }
                 };
 
                 // ========== BOM 版本号编辑 ==========
@@ -1554,13 +1558,12 @@
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ version_code: tempBomVersionCode.value })
                         });
-                        if (res.ok) {
-                            const updated = await res.json();
-                            bv.version_code = updated.version_code;
-                            editingBomVersionCode.value = null;
-                            ElMessage.success('版本号已更新');
-                        }
-                    } catch (e) { ElMessage.error('更新失败'); }
+                        await handleApiError(res);
+                        const updated = await res.json();
+                        bv.version_code = updated.version_code;
+                        editingBomVersionCode.value = null;
+                        ElMessage.success('版本号已更新');
+                    } catch (e) { console.error("操作中断:", e); }
                 };
 
                 const fetchProducts = async () => {
@@ -1739,19 +1742,15 @@
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify(payload)
                         });
-                        if (res.ok) {
-                            ElMessage.success('部件版本更新成功');
-                            updateComponentDialogVisible.value = false;
-                            if (selectedItem.value?.type === 'bom_version') {
-                                const res2 = await fetch(`${API_BASE}/bom/items/?bom_version_id=${selectedItem.value.data.id}`);
-                                bomItems.value = sanitizeBomItems(await res2.json());
-                            }
-                        } else {
-                            const err = await res.json().catch(() => ({ detail: '更新失败' }));
-                            ElMessage.error(err.detail || JSON.stringify(err));
+                        await handleApiError(res);
+                        ElMessage.success('部件版本更新成功');
+                        updateComponentDialogVisible.value = false;
+                        if (selectedItem.value?.type === 'bom_version') {
+                            const res2 = await fetch(`${API_BASE}/bom/items/?bom_version_id=${selectedItem.value.data.id}`);
+                            bomItems.value = sanitizeBomItems(await res2.json());
                         }
                     } catch (e) {
-                        ElMessage.error('网络错误：' + e.message);
+                        console.error("操作中断:", e);
                     }
                 };
 
@@ -1782,17 +1781,14 @@
                     }).then(async () => {
                         try {
                             const res = await fetch(`${API_BASE}/bom/items/${item.id}`, { method: 'DELETE' });
-                            if (res.ok) {
-                                ElMessage.success('部件删除成功');
-                                if (selectedItem.value?.type === 'bom_version') {
-                                    const res2 = await fetch(`${API_BASE}/bom/items/?bom_version_id=${selectedItem.value.data.id}`);
-                                    bomItems.value = sanitizeBomItems(await res2.json());
-                                }
-                            } else {
-                                ElMessage.error('删除失败');
+                            await handleApiError(res);
+                            ElMessage.success('部件删除成功');
+                            if (selectedItem.value?.type === 'bom_version') {
+                                const res2 = await fetch(`${API_BASE}/bom/items/?bom_version_id=${selectedItem.value.data.id}`);
+                                bomItems.value = sanitizeBomItems(await res2.json());
                             }
                         } catch (e) {
-                            ElMessage.error('网络错误');
+                            console.error("操作中断:", e);
                         }
                     }).catch(() => {});
                 };
@@ -1831,20 +1827,16 @@
                             });
                         }
 
-                        if (res.ok) {
-                            ElMessage.success(dialogMode.value === 'create' ? '新增成功' : '修改成功');
-                            editDialogVisible.value = false;
-                            if (selectedItem.value?.type === 'bom_version' && selectedItem.value.data.id) {
-                                const versionId = selectedItem.value.data.id;
-                                const itemsRes = await fetch(`${API_BASE}/bom/items/?bom_version_id=${versionId}`);
-                                if (itemsRes.ok) bomItems.value = sanitizeBomItems(await itemsRes.json());
-                            }
-                        } else {
-                            const errData = await res.json().catch(() => ({}));
-                            ElMessage.error(errData.detail || (dialogMode.value === 'create' ? '新增失败' : '修改失败'));
+                        await handleApiError(res);
+                        ElMessage.success(dialogMode.value === 'create' ? '新增成功' : '修改成功');
+                        editDialogVisible.value = false;
+                        if (selectedItem.value?.type === 'bom_version' && selectedItem.value.data.id) {
+                            const versionId = selectedItem.value.data.id;
+                            const itemsRes = await fetch(`${API_BASE}/bom/items/?bom_version_id=${versionId}`);
+                            if (itemsRes.ok) bomItems.value = sanitizeBomItems(await itemsRes.json());
                         }
                     } catch (e) {
-                        ElMessage.error(dialogMode.value === 'create' ? '新增失败' : '修改失败');
+                        console.error("操作中断:", e);
                     }
                 };
 
@@ -1877,16 +1869,12 @@
                             body: JSON.stringify(payload)
                         });
 
-                        if (res.ok) {
-                            ElMessage.success('BOM 版本创建成功');
-                            bomVersionDialogVisible.value = false;
-                            await fetchProducts();
-                        } else {
-                            const err = await res.json();
-                            ElMessage.error(err.detail || '创建失败');
-                        }
+                        await handleApiError(res);
+                        ElMessage.success('BOM 版本创建成功');
+                        bomVersionDialogVisible.value = false;
+                        await fetchProducts();
                     } catch (e) {
-                        ElMessage.error('创建失败');
+                        console.error("操作中断:", e);
                     }
                 };
 
@@ -1921,18 +1909,14 @@
                             body: JSON.stringify(payload)
                         });
 
-                        if (res.ok) {
+                        await handleApiError(res);
                         ElMessage.success('文件添加成功');
                         documentDialogVisible.value = false;
                         const res2 = await fetch(`${API_BASE}/products/${selectedItem.value.data.id}/documents`);
                         globalDocuments.value = await res2.json();
-                    } else {
-                        const err = await res.json().catch(() => ({ detail: '添加失败' }));
-                        ElMessage.error(err.detail || JSON.stringify(err));
+                    } catch (e) {
+                        console.error("操作中断:", e);
                     }
-                } catch (e) {
-                    ElMessage.error('网络错误：' + e.message);
-                }
                 };
 
                 const previewDocument = (doc) => {
@@ -1974,17 +1958,13 @@
                             body: JSON.stringify(payload)
                         });
 
-                        if (res.ok) {
-                            ElMessage.success('文件更新成功');
-                            updateDocumentDialogVisible.value = false;
-                            const res2 = await fetch(`${API_BASE}/products/${selectedItem.value.data.id}/documents`);
-                            globalDocuments.value = await res2.json();
-                        } else {
-                            const err = await res.json().catch(() => ({ detail: '更新失败' }));
-                            ElMessage.error(err.detail || JSON.stringify(err));
-                        }
+                        await handleApiError(res);
+                        ElMessage.success('文件更新成功');
+                        updateDocumentDialogVisible.value = false;
+                        const res2 = await fetch(`${API_BASE}/products/${selectedItem.value.data.id}/documents`);
+                        globalDocuments.value = await res2.json();
                     } catch (e) {
-                        ElMessage.error('网络错误：' + e.message);
+                        console.error("操作中断:", e);
                     }
                 };
 
@@ -2019,17 +1999,13 @@
                             body: JSON.stringify(payload)
                         });
 
-                        if (res.ok) {
-                            ElMessage.success('文件信息更新成功');
-                            editDocumentDialogVisible.value = false;
-                            const res2 = await fetch(`${API_BASE}/products/${selectedItem.value.data.id}/documents`);
-                            globalDocuments.value = await res2.json();
-                        } else {
-                            const err = await res.json().catch(() => ({ detail: '更新失败' }));
-                            ElMessage.error(err.detail || JSON.stringify(err));
-                        }
+                        await handleApiError(res);
+                        ElMessage.success('文件信息更新成功');
+                        editDocumentDialogVisible.value = false;
+                        const res2 = await fetch(`${API_BASE}/products/${selectedItem.value.data.id}/documents`);
+                        globalDocuments.value = await res2.json();
                     } catch (e) {
-                        ElMessage.error('网络错误：' + e.message);
+                        console.error("操作中断:", e);
                     }
                 };
 
@@ -2039,16 +2015,12 @@
                             method: 'DELETE'
                         });
 
-                        if (res.ok) {
-                            ElMessage.success('文件删除成功');
-                            const res2 = await fetch(`${API_BASE}/products/${selectedItem.value.data.id}/documents`);
-                            globalDocuments.value = await res2.json();
-                        } else {
-                            const err = await res.json().catch(() => ({ detail: '删除失败' }));
-                            ElMessage.error(err.detail || JSON.stringify(err));
-                        }
+                        await handleApiError(res);
+                        ElMessage.success('文件删除成功');
+                        const res2 = await fetch(`${API_BASE}/products/${selectedItem.value.data.id}/documents`);
+                        globalDocuments.value = await res2.json();
                     } catch (e) {
-                        ElMessage.error('网络错误：' + e.message);
+                        console.error("操作中断:", e);
                     }
                 };
 
@@ -2091,15 +2063,12 @@
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ design_files: newFiles }),
                         });
-                        if (!res.ok) {
-                            const errData = await res.json().catch(() => ({}));
-                            throw new Error(errData.detail || `HTTP ${res.status}`);
-                        }
+                        await handleApiError(res);
                         target.design_files = newFiles;
                         addDesignFileDialogVisible.value = false;
                         ElMessage.success('设计文件添加成功');
                     } catch (err) {
-                        ElMessage.error('添加失败: ' + err.message);
+                        console.error("操作中断:", err);
                     }
                 };
 
@@ -2140,15 +2109,12 @@
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ design_files: newFiles }),
                         });
-                        if (!res.ok) {
-                            const errData = await res.json().catch(() => ({}));
-                            throw new Error(errData.detail || `HTTP ${res.status}`);
-                        }
+                        await handleApiError(res);
                         target.design_files = newFiles;
                         updateDesignFileDialogVisible.value = false;
                         ElMessage.success('设计文件更新成功');
                     } catch (err) {
-                        ElMessage.error('更新失败: ' + err.message);
+                        console.error("操作中断:", err);
                     }
                 };
 
@@ -2174,29 +2140,29 @@
                 const activateBomVersion = async (versionId) => {
                     try {
                         const res = await fetch(`${API_BASE}/bom/versions/${versionId}/activate`, { method: 'PATCH' });
-                        if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.detail || '操作失败'); }
+                        await handleApiError(res);
                         ElMessage.success('版本已启用');
                         await refreshBomVersions();
-                    } catch (e) { ElMessage.error(e.message); }
+                    } catch (e) { console.error("操作中断:", e); }
                 };
 
                 const archiveBomVersion = async (versionId) => {
                     try {
                         const res = await fetch(`${API_BASE}/bom/versions/${versionId}/archive`, { method: 'PATCH' });
-                        if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.detail || '操作失败'); }
+                        await handleApiError(res);
                         ElMessage.success('版本已封存');
                         await refreshBomVersions();
-                    } catch (e) { ElMessage.error(e.message); }
+                    } catch (e) { console.error("操作中断:", e); }
                 };
 
                 const confirmDeleteBomVersion = (bv) => {
                     ElMessageBox.confirm(`确定要删除 BOM 版本 "${bv.version_code}" 吗？该操作将级联删除其下所有物料数据，不可恢复！`, '危险操作', { type: 'warning', confirmButtonText: '确定删除', cancelButtonText: '取消' }).then(async () => {
                         try {
                             const res = await fetch(`${API_BASE}/bom/versions/${bv.id}`, { method: 'DELETE' });
-                            if (!res.ok) throw new Error('删除失败');
+                            await handleApiError(res);
                             ElMessage.success('版本已删除');
                             await refreshBomVersions();
-                        } catch (e) { ElMessage.error(e.message); }
+                        } catch (e) { console.error("操作中断:", e); }
                     }).catch(() => {});
                 };
 
@@ -2229,8 +2195,11 @@
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ manual_note: row.manual_note || '' })
                         });
-                        if (res.ok) ElMessage.success('备注已保存');
-                    } catch (e) {}
+                        await handleApiError(res);
+                        ElMessage.success('备注已保存');
+                    } catch (e) {
+                        console.error("操作中断:", e);
+                    }
                 };
 
                 const exportEcnToCsv = () => {
@@ -2259,7 +2228,7 @@
                     if (!selectedItem.value || selectedItem.value.type !== 'product') return;
                     const productId = selectedItem.value.data.id;
                     try {
-                        const res = await fetch(`${API_BASE}/products/${productId}/gantt-tasks`);
+                        const res = await fetch(`${API_BASE}/api/products/${productId}/gantt-tasks`);
                         if (res.ok) ganttTasks.value = await res.json();
                         else ganttTasks.value = [];
                     } catch (e) { ganttTasks.value = []; }
@@ -2267,7 +2236,7 @@
 
                 const loadSysHolidays = async () => {
                     try {
-                        const res = await fetch(`${API_BASE}/sys-holidays`);
+                        const res = await fetch(`${API_BASE}/api/sys-holidays`);
                         if (res.ok) sysHolidays.value = await res.json();
                         else sysHolidays.value = [];
                     } catch (e) { sysHolidays.value = []; }
@@ -2275,7 +2244,7 @@
 
                 const loadTaskTemplates = async () => {
                     try {
-                        const res = await fetch(`${API_BASE}/task-templates`);
+                        const res = await fetch(`${API_BASE}/api/task-templates`);
                         if (res.ok) taskTemplates.value = await res.json();
                         else taskTemplates.value = [];
                     } catch (e) { taskTemplates.value = []; }
@@ -2317,11 +2286,13 @@
                     if (ganttInstance.value) ganttInstance.value.destroy();
                     const tasks = ganttTasks.value.map(t => ({
                         id: t.id,
+                        name: t.remark ? t.remark : t.text,
                         text: t.text + (t.assignee ? ` (${t.assignee})` : ''),
                         start_date: t.start_date,
                         end_date: t.end_date,
                         progress: t.progress,
-                        dependencies: t.dependencies || ''
+                        dependencies: t.dependencies || '',
+                        _original: t
                     }));
                     ganttInstance.value = new Gantt(container, tasks, {
                         header_height: 40,
@@ -2330,24 +2301,46 @@
                         view_mode: ganttViewMode.value,
                         date_format: 'YYYY-MM-DD',
                         popup_trigger: 'click',
-                        on_click: (task) => {},
+                        on_click: (task) => {
+                            const orig = task._original || ganttTasks.value.find(t => t.id == task.id);
+                            if (!orig) return;
+                            ganttTaskForm.value = {
+                                id: orig.id,
+                                text: orig.text,
+                                remark: orig.remark || '',
+                                assignee: orig.assignee || '',
+                                start_date: orig.start_date,
+                                duration: orig.duration || 1,
+                                is_workday_only: orig.is_workday_only || false,
+                                dependencies: orig.dependencies ? orig.dependencies.split(',').filter(Boolean).map(Number) : []
+                            };
+                            addGanttTaskDialogVisible.value = true;
+                        },
                         on_date_change: async (task, start, end) => {
                             try {
-                                await fetch(`${API_BASE}/gantt-tasks/${task.id}`, {
+                                const res = await fetch(`${API_BASE}/api/gantt-tasks/${task.id}`, {
                                     method: 'PUT',
                                     headers: { 'Content-Type': 'application/json' },
                                     body: JSON.stringify({ start_date: start, end_date: end })
                                 });
-                            } catch (e) {}
+                                await handleApiError(res);
+                            } catch (e) {
+                                console.error("拖拽日期失败:", e);
+                                refreshGantt();
+                            }
                         },
                         on_progress_change: async (task, progress) => {
                             try {
-                                await fetch(`${API_BASE}/gantt-tasks/${task.id}`, {
+                                const res = await fetch(`${API_BASE}/api/gantt-tasks/${task.id}`, {
                                     method: 'PUT',
                                     headers: { 'Content-Type': 'application/json' },
                                     body: JSON.stringify({ progress: progress })
                                 });
-                            } catch (e) {}
+                                await handleApiError(res);
+                            } catch (e) {
+                                console.error("拖拽进度失败:", e);
+                                refreshGantt();
+                            }
                         },
                         on_view_change: (mode) => {
                             ganttViewMode.value = mode;
@@ -2363,7 +2356,9 @@
 
                 const openAddGanttTaskDialog = () => {
                     ganttTaskForm.value = {
+                        id: null,
                         text: '',
+                        remark: '',
                         assignee: '',
                         start_date: '',
                         duration: 1,
@@ -2402,6 +2397,7 @@
                         const payload = {
                             product_id: selectedItem.value.data.id,
                             text: ganttTaskForm.value.text,
+                            remark: ganttTaskForm.value.remark || '',
                             assignee: ganttTaskForm.value.assignee || '',
                             start_date: ganttTaskForm.value.start_date,
                             end_date: endDate,
@@ -2410,21 +2406,49 @@
                             progress: 0,
                             dependencies: ganttTaskForm.value.dependencies.join(',')
                         };
-                        const res = await fetch(`${API_BASE}/gantt-tasks`, {
+                        const res = await fetch(`${API_BASE}/api/gantt-tasks`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify(payload)
                         });
-                        if (res.ok) {
-                            ElMessage.success('任务创建成功');
-                            addGanttTaskDialogVisible.value = false;
-                            refreshGantt();
-                        } else {
-                            const err = await res.json().catch(() => ({ detail: '创建失败' }));
-                            ElMessage.error(err.detail || JSON.stringify(err));
-                        }
+                        await handleApiError(res);
+                        ElMessage.success('任务创建成功');
+                        addGanttTaskDialogVisible.value = false;
+                        refreshGantt();
                     } catch (e) {
                         ElMessage.error('网络错误：' + e.message);
+                    }
+                };
+
+                const saveEditGanttTask = async () => {
+                    if (!ganttTaskForm.value.id) return;
+                    const endDate = calculateEndDate(
+                        ganttTaskForm.value.start_date,
+                        ganttTaskForm.value.duration,
+                        ganttTaskForm.value.is_workday_only
+                    );
+                    try {
+                        const payload = {
+                            text: ganttTaskForm.value.text,
+                            remark: ganttTaskForm.value.remark || '',
+                            assignee: ganttTaskForm.value.assignee || '',
+                            start_date: ganttTaskForm.value.start_date,
+                            end_date: endDate,
+                            duration: ganttTaskForm.value.duration,
+                            is_workday_only: ganttTaskForm.value.is_workday_only,
+                            dependencies: ganttTaskForm.value.dependencies.join(',')
+                        };
+                        const res = await fetch(`${API_BASE}/api/gantt-tasks/${ganttTaskForm.value.id}`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload)
+                        });
+                        await handleApiError(res);
+                        ElMessage.success('任务修改成功');
+                        addGanttTaskDialogVisible.value = false;
+                        refreshGantt();
+                    } catch (e) {
+                        console.error("操作中断:", e);
                     }
                 };
 
@@ -2434,9 +2458,16 @@
                         return;
                     }
                     
-                    ganttTaskForm.value.text = template.template_name;
-                    ganttTaskForm.value.duration = template.default_duration || 1;
-                    ganttTaskForm.value.is_workday_only = false;
+                    ganttTaskForm.value = {
+                        id: null,
+                        text: template.template_name,
+                        remark: '',
+                        assignee: '',
+                        start_date: '',
+                        duration: template.default_duration || 1,
+                        is_workday_only: false,
+                        dependencies: []
+                    };
                     templateDrawerVisible.value = false;
                     addGanttTaskDialogVisible.value = true;
                 };
@@ -2447,7 +2478,7 @@
                         return;
                     }
                     try {
-                        const res = await fetch(`${API_BASE}/task-templates`, {
+                        const res = await fetch(`${API_BASE}/api/task-templates`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
@@ -2455,28 +2486,30 @@
                                 default_duration: newTemplateDuration.value
                             })
                         });
-                        if (res.ok) {
-                            ElMessage.success('模板已添加');
-                            newTemplateName.value = '';
-                            newTemplateDuration.value = 1;
-                            addTemplateDialogVisible.value = false;
-                            loadTaskTemplates();
-                        } else {
-                            const err = await res.json().catch(() => ({ detail: '创建失败' }));
-                            ElMessage.error(err.detail || JSON.stringify(err));
-                        }
+                        await handleApiError(res);
+                        ElMessage.success('模板已添加');
+                        newTemplateName.value = '';
+                        newTemplateDuration.value = 1;
+                        addTemplateDialogVisible.value = false;
+                        loadTaskTemplates();
                     } catch (e) {
-                        ElMessage.error('网络错误：' + e.message);
+                        console.error("操作中断:", e);
                     }
                 };
 
-                watch(selectedItem, () => {
-                    loadGanttTasks();
+                watch(selectedItem, async () => {
+                    await loadGanttTasks();
+                    if (activeProductTab.value === 'gantt') {
+                        await nextTick();
+                        initGantt();
+                    }
                 });
 
-                watch(activeProductTab, (newTab) => {
+                watch(activeProductTab, async (newTab) => {
                     if (newTab === 'gantt') {
-                        nextTick(() => { initGantt(); });
+                        await loadGanttTasks();
+                        await nextTick();
+                        initGantt();
                     }
                 });
 
@@ -2532,6 +2565,7 @@
                     ganttTaskForm,
                     openAddGanttTaskDialog,
                     addGanttTask,
+                    saveEditGanttTask,
                     refreshGantt,
                     sysHolidays,
                     taskTemplates,
