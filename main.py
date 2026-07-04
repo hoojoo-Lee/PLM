@@ -16,20 +16,21 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="PLM Backend",
-    description="轻量级 PLM 后端服务",
-    version="0.1.0",
+    description="敏捷硬件 PLM 后端服务 - V4.0 架构",
+    version="1.0.0",
     lifespan=lifespan,
 )
+
 from fastapi.middleware.cors import CORSMiddleware
 
-# 解除 CORS 跨域限制，允许前端网页访问后端 API
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 允许所有域名访问
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],  # 允许所有请求方法 (GET, POST 等)
-    allow_headers=["*"],  # 允许所有请求头
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
+
 
 @app.get("/", tags=["Health"])
 def read_root():
@@ -41,23 +42,28 @@ def health_check(db: Session = Depends(get_db)):
     return {"status": "healthy", "database": "connected"}
 
 
-# include routers
 from routers.product_api import router as product_router
-from routers.project_api import router as project_router
+from routers.customer_api import router as customer_router
 from routers.bom_api import router as bom_router
+from routers.project_api import router as project_router
 from routers.document_api import router as document_router
 from routers.gantt_api import router as gantt_router
+from routers.tracker_api import router as tracker_router
+from routers.risk_api import router as risk_router
+from routers.npi_api import router as npi_router
 
 app.include_router(product_router)
-app.include_router(project_router)
+app.include_router(customer_router)
 app.include_router(bom_router)
+app.include_router(project_router)
 app.include_router(document_router)
 app.include_router(gantt_router)
+app.include_router(tracker_router)
+app.include_router(risk_router)
+app.include_router(npi_router)
 
-# 挂载静态文件目录，用于本地图片上传
 upload_dir = os.path.join(os.path.dirname(__file__), "uploads")
 os.makedirs(upload_dir, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=upload_dir), name="uploads")
 
-# 挂载前端静态文件
 app.mount("/", StaticFiles(directory=os.path.dirname(__file__), html=True), name="frontend")

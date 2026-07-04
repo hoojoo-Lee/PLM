@@ -46,7 +46,7 @@ def seed_data(db):
         product_id=product.id,
         version_code="V1.0_Alpha",
         status="archived",
-        received_at=datetime(2025, 5, 1, 10, 0, 0),
+        released_at=datetime(2025, 5, 1, 10, 0, 0),
         change_notes="客户初始交付EE-BOM (2025-05-01)",
         created_by="张三",
     )
@@ -61,9 +61,7 @@ def seed_data(db):
             "mpn": "STM32F103RCT6",
             "name": "STM32F103RCT6 微控制器",
             "quantity": 1,
-            "designator": "U1",
             "responsible": "张三",
-            "status": "released",
             "picture_drive_id": "1-vR_k8wWvS8K6PzR2u-1hXzBvM4Qp8J9",
         },
         {
@@ -71,9 +69,7 @@ def seed_data(db):
             "mpn": "10uF 0603 16V",
             "name": "贴片电容 10uF 0603 16V X5R",
             "quantity": 5,
-            "designator": "C24",
             "responsible": "李四",
-            "status": "released",
             "picture_drive_id": None,
         },
     ]
@@ -82,7 +78,7 @@ def seed_data(db):
         item = models.BOMItem(bom_version_id=bom_v1.id, **item_data)
         db.add(item)
         db.flush()
-        print(f"    [-] BOM_Item 创建成功: {item_data['designator']} - {item_data['mpn']}")
+        print(f"    [-] BOM_Item 创建成功: {item_data['mpn']}")
 
     # ==========================================================================
     # BOM_Version 2: V2.0 (当前活动)
@@ -90,8 +86,10 @@ def seed_data(db):
     bom_v2 = models.BOMVersion(
         product_id=product.id,
         version_code="V2.0_Beta",
+        bom_type="EE",
+        variant_tag="V2",
         status="active",
-        received_at=datetime(2025, 6, 28, 14, 30, 0),
+        released_at=datetime(2025, 6, 28, 14, 30, 0),
         change_notes="客户升级了MCU并缩小了电容封装",
         created_by="张三",
     )
@@ -106,9 +104,7 @@ def seed_data(db):
             "mpn": "STM32F405RGT6",
             "name": "STM32F405RGT6 微控制器 (升级版)",
             "quantity": 1,
-            "designator": "U1",
             "responsible": "张三",
-            "status": "engineering",
             "picture_drive_id": "1-vR_k8wWvS8K6PzR2u-1hXzBvM4Qp8J9",
         },
         {
@@ -116,9 +112,7 @@ def seed_data(db):
             "mpn": "10uF 0402 10V",
             "name": "贴片电容 10uF 0402 10V X5R (小型化)",
             "quantity": 5,
-            "designator": "C24",
             "responsible": "李四",
-            "status": "engineering",
             "picture_drive_id": None,
         },
         {
@@ -126,9 +120,7 @@ def seed_data(db):
             "mpn": "2.2uH 2A 顶盟",
             "name": "功率电感 2.2uH 2A SMD",
             "quantity": 1,
-            "designator": "L5",
             "responsible": "王五",
-            "status": "engineering",
             "picture_drive_id": None,
         },
     ]
@@ -137,7 +129,7 @@ def seed_data(db):
         item = models.BOMItem(bom_version_id=bom_v2.id, **item_data)
         db.add(item)
         db.flush()
-        print(f"    [-] BOM_Item 创建成功: {item_data['designator']} - {item_data['mpn']}")
+        print(f"    [-] BOM_Item 创建成功: {item_data['mpn']}")
 
     # ==========================================================================
     # Product 级全局文件 (测试数据)
@@ -148,37 +140,61 @@ def seed_data(db):
             "bom_item_id": None,
             "title": "AGX-Carrier 电气原理图 V1.0",
             "document_type": "drawing",
-            "version": "1.0",
-            "google_drive_id": "1Bxv8K9L2mN4pQ6rS8tU0vW1xY3zA5bC",
-            "status": "released",
-            "update_notes": "初版释放",
+            "category": None,
+            "status": "active",
+            "versions": [
+                {
+                    "version_number": "1.0",
+                    "google_drive_id": "1Bxv8K9L2mN4pQ6rS8tU0vW1xY3zA5bC",
+                    "status": "released",
+                    "update_notes": "初版释放",
+                }
+            ]
         },
         {
             "product_id": product.id,
             "bom_item_id": None,
             "title": "产品测试规范书",
             "document_type": "test_report",
-            "version": "1.0",
-            "google_drive_id": "2CxY9aB0kL3mO5pQ7rT9sU1vW2xZ4aC",
-            "status": "released",
-            "update_notes": "量产前测试标准",
+            "category": None,
+            "status": "active",
+            "versions": [
+                {
+                    "version_number": "1.0",
+                    "google_drive_id": "2CxY9aB0kL3mO5pQ7rT9sU1vW2xZ4aC",
+                    "status": "released",
+                    "update_notes": "量产前测试标准",
+                }
+            ]
         },
         {
             "product_id": product.id,
             "bom_item_id": None,
             "title": "包装规范要求",
             "document_type": "package",
-            "version": "1.0",
-            "google_drive_id": "3DyZ0bC1lM4nP6qR8tU2vW3xY5aB7dE",
-            "status": "draft",
-            "update_notes": "待客户确认",
+            "category": None,
+            "status": "active",
+            "versions": [
+                {
+                    "version_number": "1.0",
+                    "google_drive_id": "3DyZ0bC1lM4nP6qR8tU2vW3xY5aB7dE",
+                    "status": "draft",
+                    "update_notes": "待客户确认",
+                }
+            ]
         },
     ]
 
     for doc_data in docs:
+        versions_data = doc_data.pop("versions")
         doc = models.Document(**doc_data)
         db.add(doc)
         db.flush()
+        
+        for v_data in versions_data:
+            v = models.DocumentVersion(document_id=doc.id, **v_data)
+            db.add(v)
+        
         print(f"    [-] Document 创建成功: {doc_data['title']}")
 
     db.commit()
