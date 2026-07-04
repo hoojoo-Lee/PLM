@@ -1,51 +1,53 @@
-\# 个人轻量级 PLM 系统开发备忘录
+# PLM System Architecture & Development Constraints (V1.0)
 
+## 0. 开发者行为准则 (Developer Behavioral Code)
+1. **绝不造轮子**：尽最大可能调用成熟的 npm 包（如 Element Plus, 成熟的甘特图库）和 Python 库来实现功能。首要保证开发速度和系统稳定性。
+2. **意图大于字面指令**：PO 负责提供业务蓝图，可能缺乏底层技术细节。如果发现技术指令存在漏洞、有性能隐患，或者有更好的开源方案，绝对不要盲目执行。必须主动理解最终业务意图，纠正技术错误，并给出最优的工程实现路径。
 
-## 1. 技术栈
-- 数据库：PostgreSQL
-- 文件存储：Google Drive API (仅存储 File ID)
-- 后端：Python (FastAPI + SQLAlchemy)
-- 前端：[待定，如 Vue3 或 React]
+## 1. 核心业务纪律 (Business Disciplines)
+* **绝对主键**：`product_id` 是系统唯一的数据隔离中心。任何业务数据必须带有 `product_id`。
+* **BOM 变体与防腐**：不建独立的 SKU 表。在 `bom_versions` 表增加 `bom_type` (EE/ME/PKG) 和 `variant_tag` 来支持变体。
+* **柔性防呆**：BOM Released 后前端依然允许编辑，后端依靠 `change_logs` 捕捉 JSON Diff 数据，实现极简 ECN。
+* **单向软绑定**：NPI 任务 (`tracker_tasks`) 与 `gantt_tasks` 松散耦合。`tracker_tasks` 中保留可为空的 `gantt_task_id`，仅完成状态单向联动。
+* **文控血脉**：文件管理遵守 `documents` (逻辑主体) -> `document_versions` (物理文件) 的父子级结构。
 
+## 2. 核心架构红线 (Architecture Rules)
+* **绝对主键**：`product_id` 是系统唯一的数据隔离与挂载中心。任何新表必须带 `product_id`。
+* **不建 SKU 表**：通过 `bom_versions` 表中的 `bom_type` (EE/ME/PKG) 和 `variant_tag` (如 Base) 来实现软性变体。
+* **柔性防呆**：BOM 即使在 `Released` 状态，前端依然允许用户编辑。后端依赖 `change_logs` 捕捉 diff_data，严禁做硬性 403 拦截。
+* **单向软绑定**：NPI 任务 (`tracker_tasks`) 与 `gantt_tasks` 是松散耦合。`tracker_tasks` 中包含可为空的 `gantt_task_id`。
+* **文控血脉**：文件管理严格遵守 `documents` (逻辑主体) -> `document_versions` (物理文件版本) 的父子级结构。
 
-\## 2. 核心设计原则
+## 3. 数据库设计防御 (Database Constraints)
+* **BOM 版本防冲突**：在 `bom_versions` 中，联合字段 `[product_id, bom_type, variant_tag, version]` 必须建立 Unique 约束。
+* **JSON Diff 规范**：`change_logs` 的 `diff_data` 必须是结构化的，格式要求为：`{"field": "quantity", "old": 5, "new": 6}`。
 
-\- \*\*强关联\*\*：以项目为主线，图纸/文件为核心，BOM 和物料联动。
+## 4. 终极数据架构 ER 图 (Mermaid)
+```mermaid
+erDiagram
+    CUSTOMERS ||--o{ PRODUCTS : owns
+    PRODUCTS ||--o{ BOM_VERSIONS : has
+    PRODUCTS ||--o{ GANTT_TASKS : schedules
+    PRODUCTS ||--o{ TRACKER_TASKS : tracks
+    PRODUCTS ||--o{ RISKS : faces
+    PRODUCTS ||--o{ DOCUMENTS : manages
+    BOM_VERSIONS ||--o{ BOM_ITEMS : contains
+    BOM_ITEMS ||--o{ CHANGE_LOGS : triggers
+    GANTT_TASKS |o--o{ TRACKER_TASKS : soft_sync
+    DOCUMENTS ||--o{ DOCUMENT_VERSIONS : maintains
 
-\- \*\*低颗粒度\*\*：抛弃复杂的审批流，采用单版本覆盖 + 线性历史记录。
-
-\- \*\*自动化 Tracker\*\*：任何实体的增删改操作，都要自动向 `change\_log` 表写入 JSONB 格式的差异记录。
-
-
-
-\## 3. 核心业务实体
-
-1\. Project (项目) \& Issue (质量/缺陷追踪)
-
-2\. Part (物料主数据)
-
-3\. BOM (多层级物料清单，通过递归查询构建)
-
-4\. Document (图纸/规格书，必须包含 google\_drive\_file\_id 字段)
-
-5\. ChangeLog (自动化变更流水)
-
-## 4. 全局业务逻辑与目标模式对齐 (基于 Control Book 表格逻辑)
-
-### 模块 A：项目进度与风险主线 (Project & Progress & Risk)
-- **项目表 (Project)**：管理全局项目。
-- **进度表 (Timeline/Milestone)**：替代 Excel 里的 Gantt/Timeline，记录项目的关键节点（如 EVT, DVT, S1, S2 阶段）和预计/实际完成时间。
-- **风险与追踪 (Issue/RiskTracker)**：替代 Excel 里的 Risk List，记录跟进事项，必须关联到具体的 Project，且可选关联具体的 Part。
-
-### 模块 B：扁平化物料管理 (Flat Part List)
-- **抛弃复杂 BOM 树**：物料不需要复杂的父子层级，只需通过 `project_id` 和 `category` (如 EE-BOM, ME-BOM, PKG-BOM) 扁平化挂载在项目下。
-- **关键字段对齐**：必须包含产品图 (Picture Drive ID)、MPN、内部料号、负责人 (Responsible)、定型状态 (Design finalization) 以及交期 (Lead Time)。
-
-### 模块 C：文件版本与预览核心 (Document & Versioning)
-- **图纸归档**：Document 直接挂载在 Part 下。
-- **强制版本记录**：每次上传新图纸或更新链接，必须带上 Version 号和更新说明 (Update Notes)。
-- **在线预览**：强依赖 Google Drive API 的 File ID，前端能够直接调用预览产品图和 PDF/图纸。
-
-### 模块 D：自动化更新日志 (Auto-ChangeLog)
-- **无需手动写流水**：任何人（或你自己）修改了 Part 的状态、更新了 Document 的版本、或者推进了 Timeline，系统在后端（FastAPI 拦截器）自动生成一条日志记录。
-- **日志展示**：在项目主页和物料主页，可以直接渲染出类似“朋友圈”的时间轴，清晰显示“什么时间、谁、把设计版本从 V1 更新到了 V2”。
+    BOM_VERSIONS {
+        string bom_type
+        string variant_tag
+        string status
+    }
+    BOM_ITEMS {
+        string ref_des
+        string footprint
+    }
+    TRACKER_TASKS {
+        int gantt_task_id FK
+        string category
+        string status
+    }
+```
