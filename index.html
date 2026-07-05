@@ -64,12 +64,31 @@
     <div id="app">
         <el-container class="h-screen flex flex-col">
             <el-header class="bg-white border-b border-gray-200 shadow-sm">
-                <div class="flex items-center justify-center h-full">
+                <div class="flex items-center justify-between h-full px-6">
                     <h1 class="text-xl font-bold tracking-tight">
                         <span class="text-blue-600">敏捷硬件研发协同台</span>
                         <span class="text-gray-400 mx-2">|</span>
                         <span class="text-gray-800">控制中心</span>
                     </h1>
+                    <div v-if="products.length > 0" class="flex items-center space-x-4">
+                        <span class="text-sm text-gray-500">当前产品:</span>
+                        <el-select 
+                            v-model="currentProductId" 
+                            placeholder="选择产品"
+                            size="small"
+                            @change="handleProductChange"
+                            class="w-48"
+                        >
+                            <el-option 
+                                v-for="p in products" 
+                                :key="p.id" 
+                                :label="p.name" 
+                                :value="p.id"
+                            >
+                                <span>{{ p.customer_name ? '[' + p.customer_name + ']' : '' }}{{ p.name }}</span>
+                            </el-option>
+                        </el-select>
+                    </div>
                 </div>
             </el-header>
 
@@ -245,21 +264,23 @@
                                                                 <el-icon><Edit class="w-3 h-3" /></el-icon>
                                                             </el-button>
                                                         </div>
-                                                        <el-tag size="small" type="primary">{{ formatVersion(doc.version) }}</el-tag>
+                                                        <div class="flex items-center space-x-2">
+                                                            <el-tag size="small" type="primary">{{ formatVersion(doc.latest_version?.version_number || '-') }}</el-tag>
+                                                            <el-button size="small" @click="doc.expanded = !doc.expanded" class="text-gray-400">
+                                                                <el-icon><ArrowDown v-if="!doc.expanded" class="w-3 h-3" /><ArrowUp v-else class="w-3 h-3" /></el-icon>
+                                                            </el-button>
+                                                        </div>
                                                     </div>
                                                     <div class="flex items-center space-x-2 mb-2">
                                                         <el-icon class="w-3 h-3 text-gray-400"><Calendar /></el-icon>
-                                                        <span class="text-xs text-gray-500">{{ formatDate(doc.received_date) }}</span>
+                                                        <span class="text-xs text-gray-500">{{ formatDate(doc.latest_version?.received_date) }}</span>
+                                                        <span v-if="doc.versions && doc.versions.length > 1" class="text-xs text-blue-500">({{ doc.versions.length }} 个版本)</span>
                                                     </div>
-                                                    <p v-if="doc.update_notes" class="text-xs text-gray-500 mb-3">{{ doc.update_notes }}</p>
+                                                    <p v-if="doc.latest_version?.update_notes" class="text-xs text-gray-500 mb-3">{{ doc.latest_version.update_notes }}</p>
                                                     <div class="flex space-x-2">
                                                         <el-button size="small" @click="previewDocument(doc)" class="text-xs">
                                                             <el-icon><View class="w-3 h-3 mr-1" /></el-icon>
                                                             预览
-                                                        </el-button>
-                                                        <el-button size="small" @click="openDocChangelogDialog(doc)" class="text-xs">
-                                                            <el-icon><Clock class="w-3 h-3 mr-1" /></el-icon>
-                                                            历史
                                                         </el-button>
                                                         <el-button size="small" type="primary" @click="openUpdateDocumentDialog(doc)" class="text-xs">
                                                             <el-icon><Refresh class="w-3 h-3 mr-1" /></el-icon>
@@ -270,6 +291,18 @@
                                                             删除
                                                         </el-button>
                                                     </div>
+                                                    <div v-if="doc.expanded && doc.versions && doc.versions.length > 0" class="mt-4 pt-4 border-t border-blue-200">
+                                                        <div class="text-xs font-semibold text-blue-600 mb-2">📦 物理版本列表</div>
+                                                        <div v-for="(ver, idx) in doc.versions" :key="ver.id" class="flex items-center justify-between p-2 bg-white rounded mb-1">
+                                                            <div class="flex items-center space-x-2">
+                                                                <el-tag size="mini" :type="idx === 0 ? 'success' : 'info'">{{ ver.version_number }}</el-tag>
+                                                                <span class="text-xs text-gray-600">{{ formatDate(ver.created_at) }}</span>
+                                                            </div>
+                                                            <el-button size="small" @click="previewDocumentVersion(doc, ver)" class="text-xs">
+                                                                <el-icon><View class="w-3 h-3 mr-1" /></el-icon>查看
+                                                            </el-button>
+                                                        </div>
+                                                    </div>
                                                 </el-card>
                                             </el-col>
                                         </el-row>
@@ -277,16 +310,93 @@
                                 </div>
                             </el-tab-pane>
 
+                            <el-tab-pane label="NPI Tracker" name="tracker">
+                                <div class="space-y-4">
+                                    <div class="flex items-center justify-between">
+                                        <div class="flex items-center space-x-4">
+                                            <div class="flex items-center space-x-2">
+                                                <span class="text-sm text-gray-600">当前项目:</span>
+                                                <el-select v-model="selectedProjectId" placeholder="选择项目" @change="loadTrackerTasks" style="width: 200px">
+                                                    <el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" />
+                                                </el-select>
+                                                <el-button type="primary" link size="small" @click="openCreateProjectDialog">+ 新建项目</el-button>
+                                                <span v-if="projects.length === 0" class="text-xs text-red-500">请先创建项目</span>
+                                            </div>
+                                            <div class="flex items-center space-x-2">
+                                                <el-tag v-for="stage in trackerStages" :key="stage" 
+                                                    :type="activeTrackerStage === stage ? 'primary' : 'info'"
+                                                    size="small"
+                                                    @click="activeTrackerStage = stage"
+                                                    class="cursor-pointer">{{ stage.toUpperCase() }}</el-tag>
+                                            </div>
+                                        </div>
+                                        <el-button size="small" type="primary" @click="initTrackerStage(activeTrackerStage)">
+                                            <el-icon><Plus class="w-3 h-3 mr-1" /></el-icon>初始化阶段任务
+                                        </el-button>
+                                    </div>
+                                    <el-table :data="trackerTasks.filter(t => !activeTrackerStage || t.stage === activeTrackerStage)" border>
+                                        <el-table-column prop="task_description" label="任务描述" min-width="200" />
+                                        <el-table-column prop="stage" label="阶段" width="80">
+                                            <template #default="{ row }">
+                                                <el-tag size="small">{{ row.stage?.toUpperCase() }}</el-tag>
+                                            </template>
+                                        </el-table-column>
+                                        <el-table-column prop="owner" label="负责人" width="100" />
+                                        <el-table-column prop="status" label="状态" width="100">
+                                            <template #default="{ row }">
+                                                <el-tag :type="row.status === 'done' ? 'success' : row.status === 'in_progress' ? 'warning' : 'info'" size="small">
+                                                    {{ row.status === 'done' ? '完成' : row.status === 'in_progress' ? '进行中' : '待处理' }}
+                                                </el-tag>
+                                            </template>
+                                        </el-table-column>
+                                        <el-table-column prop="priority" label="优先级" width="80">
+                                            <template #default="{ row }">
+                                                <el-tag :type="row.priority === 'P1' ? 'danger' : row.priority === 'P2' ? 'warning' : 'info'" size="small">
+                                                    {{ row.priority }}
+                                                </el-tag>
+                                            </template>
+                                        </el-table-column>
+                                        <el-table-column prop="deadline" label="截止日期" width="120" />
+                                        <el-table-column label="甘特任务" width="180">
+                                            <template #default="{ row }">
+                                                <el-select v-model="row.gantt_task_id" placeholder="选择甘特任务" size="small" @change="updateTrackerTask(row)">
+                                                    <el-option :value="null" label="无" />
+                                                    <el-option v-for="gt in ganttTasks" :key="gt.id" :value="gt.id" :label="gt.task_text" />
+                                                </el-select>
+                                            </template>
+                                        </el-table-column>
+                                        <el-table-column label="操作" width="150">
+                                            <template #default="{ row }">
+                                                <el-button v-if="!row.gantt_task_id" size="small" type="primary" @click="syncToGantt(row)">
+                                                    <el-icon><ArrowRight class="w-3 h-3 mr-1" /></el-icon>同步至甘特图
+                                                </el-button>
+                                                <el-button v-else size="small" type="info" disabled>已同步</el-button>
+                                            </template>
+                                        </el-table-column>
+                                    </el-table>
+                                </div>
+                            </el-tab-pane>
+
                             <el-tab-pane label="项目排程 (Gantt)" name="gantt">
                                 <div>
                                     <div class="flex items-center justify-between mb-4">
-                                        <div class="flex items-center space-x-2">
-                                            <el-button type="primary" size="small" @click="openAddGanttTaskDialog">
-                                                <el-icon><Plus class="w-4 h-4 mr-1" /></el-icon>极速新增任务
-                                            </el-button>
-                                            <el-button type="info" plain @click="templateDrawerVisible = true">
-                                                <el-icon class="mr-1"><Menu /></el-icon> 任务模板库
-                                            </el-button>
+                                        <div class="flex items-center space-x-4">
+                                            <div class="flex items-center space-x-2">
+                                            <span class="text-sm text-gray-600">当前项目:</span>
+                                            <el-select v-model="selectedProjectId" placeholder="选择项目" style="width: 200px">
+                                                <el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" />
+                                            </el-select>
+                                            <el-button type="primary" link size="small" @click="openCreateProjectDialog">+ 新建项目</el-button>
+                                            <span v-if="projects.length === 0" class="text-xs text-red-500">请先创建项目</span>
+                                        </div>
+                                            <div class="flex items-center space-x-2">
+                                                <el-button type="primary" size="small" @click="openAddGanttTaskDialog">
+                                                    <el-icon><Plus class="w-4 h-4 mr-1" /></el-icon>极速新增任务
+                                                </el-button>
+                                                <el-button type="info" plain @click="templateDrawerVisible = true">
+                                                    <el-icon class="mr-1"><Menu /></el-icon> 任务模板库
+                                                </el-button>
+                                            </div>
                                         </div>
                                     </div>
                                     <div id="gantt-container" class="bg-white rounded-lg border border-gray-200" style="min-height: 500px; width: 100%; overflow-x: auto;"></div>
@@ -675,6 +785,17 @@
                 <el-form-item label="版本号" required>
                     <el-input v-model="bomVersionForm.version_code" placeholder="如：V1.0 (20260629_Alpha)" />
                 </el-form-item>
+                <el-form-item label="BOM类型">
+                    <el-select v-model="bomVersionForm.bom_type" placeholder="选择 BOM 类型">
+                        <el-option label="工程 BOM (EBOM)" value="engineering" />
+                        <el-option label="制造 BOM (MBOM)" value="manufacturing" />
+                        <el-option label="销售 BOM (SBOM)" value="sales" />
+                        <el-option label="采购 BOM (PBOM)" value="procurement" />
+                    </el-select>
+                </el-form-item>
+                <el-form-item label="变体标签">
+                    <el-input v-model="bomVersionForm.variant_tag" placeholder="如：标准版、Pro版、海外版（可选）" />
+                </el-form-item>
                 <el-form-item label="变更备注">
                     <el-input type="textarea" v-model="bomVersionForm.change_notes" placeholder="描述本次客户交付BOM的初始状态或变更核心点" />
                 </el-form-item>
@@ -770,7 +891,9 @@
         <el-dialog v-model="editProductDialogVisible" title="编辑产品信息" width="500px">
             <el-form :model="editProductForm" label-width="100px">
                 <el-form-item label="客户名称" required>
-                    <el-input v-model="editProductForm.customer_name" placeholder="如：Semtech" />
+                    <el-select v-model="editProductForm.customer_id" placeholder="选择客户">
+                        <el-option v-for="c in customers" :key="c.id" :value="c.id" :label="c.name" />
+                    </el-select>
                 </el-form-item>
                 <el-form-item label="产品名称" required>
                     <el-input v-model="editProductForm.name" placeholder="如：SX9331Q/WQ" />
@@ -973,6 +1096,12 @@
 
         <el-dialog v-model="addGanttTaskDialogVisible" :title="ganttTaskForm.id ? '编辑任务' : '极速新增任务'" width="500px">
             <el-form :model="ganttTaskForm" label-width="100px">
+                <el-form-item label="项目" required>
+                    <el-select v-model="selectedProjectId" placeholder="选择项目">
+                        <el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" />
+                    </el-select>
+                    <span v-if="projects.length === 0" class="text-xs text-red-500 ml-2">请先创建项目</span>
+                </el-form-item>
                 <el-form-item label="任务名称" required>
                     <el-input v-model="ganttTaskForm.text" placeholder="如：结构件开模" />
                 </el-form-item>
@@ -1038,24 +1167,61 @@
                 <el-button type="primary" @click="addTaskTemplate">确认添加</el-button>
             </template>
         </el-dialog>
+
+        <el-dialog v-model="createProjectDialogVisible" title="新建项目" width="450px">
+            <el-form :model="projectFormData" label-width="100px">
+                <el-form-item label="项目名称" required>
+                    <el-input v-model="projectFormData.name" placeholder="请输入项目名称" />
+                </el-form-item>
+                <el-form-item label="项目编码" required>
+                    <el-input v-model="projectFormData.code" placeholder="请输入项目编码" />
+                </el-form-item>
+                <el-form-item label="项目经理">
+                    <el-input v-model="projectFormData.pm" placeholder="输入项目经理姓名" />
+                </el-form-item>
+                <el-form-item label="销售">
+                    <el-input v-model="projectFormData.sales" placeholder="输入销售姓名" />
+                </el-form-item>
+                <el-form-item label="电气工程师">
+                    <el-input v-model="projectFormData.ee" placeholder="输入 EE 姓名" />
+                </el-form-item>
+                <el-form-item label="结构工程师">
+                    <el-input v-model="projectFormData.me" placeholder="输入 ME 姓名" />
+                </el-form-item>
+            </el-form>
+            <template #footer>
+                <el-button @click="createProjectDialogVisible = false">取消</el-button>
+                <el-button type="primary" @click="saveProject">确认创建</el-button>
+            </template>
+        </el-dialog>
     </div>
 
     <script>
         const { createApp, ref, computed, onMounted, watch, nextTick } = Vue;
         const { ElMessage, ElMessageBox } = ElementPlus;
 
-        const API_BASE = 'http://127.0.0.1:8080';
+        const API_BASE = '';
 
         const handleApiError = async (response) => {
             if (!response.ok) {
                 let errorMsg = `请求失败 (状态码: ${response.status})`;
                 try {
                     const errorData = await response.json();
-                    errorMsg = errorData.detail || errorData.message || errorMsg;
+                    if (errorData.detail) {
+                        if (Array.isArray(errorData.detail)) {
+                            errorMsg = errorData.detail.map(e => e.msg || e).join('; ');
+                        } else if (typeof errorData.detail === 'object') {
+                            errorMsg = JSON.stringify(errorData.detail);
+                        } else {
+                            errorMsg = errorData.detail;
+                        }
+                    } else if (errorData.message) {
+                        errorMsg = errorData.message;
+                    }
                 } catch (e) {
                     console.error("无法解析后端错误详情:", e);
                 }
-                ElMessage.error(`系统异常: ${errorMsg}`);
+                ElMessage.error(errorMsg);
                 throw new Error(errorMsg);
             }
             return response;
@@ -1065,6 +1231,8 @@
             setup() {
                 const treeData = ref([]);
                 const selectedItem = ref(null);
+                const currentProductId = ref(null);
+                const products = ref([]);
                 const bomItems = ref([]);
                 const globalDocuments = ref([]);
                 const aggregatedLogs = ref([]);
@@ -1074,6 +1242,17 @@
                 const ganttViewMode = ref('Week');
                 const ganttInstance = ref(null);
                 const addGanttTaskDialogVisible = ref(false);
+                const projects = ref([]);
+                const selectedProjectId = ref(null);
+                const createProjectDialogVisible = ref(false);
+                const projectFormData = ref({
+                    name: '',
+                    code: '',
+                    pm: '',
+                    sales: '',
+                    ee: '',
+                    me: ''
+                });
                 const ganttTaskForm = ref({
                     id: null,
                     text: '',
@@ -1087,6 +1266,11 @@
                 const sysHolidays = ref([]);
                 const taskTemplates = ref([]);
                 const templateDrawerVisible = ref(false);
+                
+                const trackerTasks = ref([]);
+                const activeTrackerStage = ref('');
+                const trackerStages = ['proto', 'dvt', 'pvt', 'mp'];
+                const npiCategories = ref([]);
                 const addTemplateDialogVisible = ref(false);
                 const newTemplateName = ref('');
                 const newTemplateDuration = ref(1);
@@ -1114,6 +1298,8 @@
                 const bomVersionDialogVisible = ref(false);
                 const bomVersionForm = ref({
                     version_code: '',
+                    bom_type: 'engineering',
+                    variant_tag: '',
                     change_notes: ''
                 });
 
@@ -1139,7 +1325,8 @@
                 const createProductForm = ref({ name: '', customer_name: '' });
 
                 const editProductDialogVisible = ref(false);
-                const editProductForm = ref({ id: null, name: '', customer_name: '' });
+                const editProductForm = ref({ id: null, name: '', customer_id: null });
+                const customers = ref([]);
 
                 // BOM 版本号编辑
                 const editingBomVersionCode = ref(null);
@@ -1200,7 +1387,8 @@
 
                 const importUrl = computed(() => {
                     if (selectedItem.value?.type === 'bom_version') {
-                        return `${API_BASE}/bom/import/${selectedItem.value.data.id}`;
+                        const productId = getProductId();
+                        return `${API_BASE}/products/${productId}/bom-versions/${selectedItem.value.data.id}/import/parse`;
                     }
                     return '';
                 });
@@ -1213,8 +1401,9 @@
                         return;
                     }
                     
+                    const productId = getProductId();
                     const bomVersionId = selectedItem.value.data.id;
-                    const url = `${API_BASE}/bom/import/${bomVersionId}`;
+                    const url = `${API_BASE}/products/${productId}/bom-versions/${bomVersionId}/import/parse`;
                     
                     const formData = new FormData();
                     formData.append('file', file);
@@ -1251,7 +1440,8 @@
                     importDialogVisible.value = false;
                     if (selectedItem.value?.type === 'bom_version') {
                         try {
-                            const res = await fetch(`${API_BASE}/bom/items/?bom_version_id=${selectedItem.value.data.id}`);
+                            const productId = getProductId();
+                            const res = await fetch(`${API_BASE}/products/${productId}/bom-versions/${selectedItem.value.data.id}/items`);
                             bomItems.value = sanitizeBomItems(await res.json());
                         } catch (e) {
                             ElMessage.error('刷新物料列表失败');
@@ -1321,8 +1511,11 @@
 
                 const saveItemOrder = async () => {
                     const reorderData = activeBomItems.value.map((item, idx) => ({ id: item.id, sort_order: idx }));
+                    const productId = getProductId();
+                    const activeVersion = productBomVersions.value.find(v => v.status === 'active');
+                    if (!activeVersion) return;
                     try {
-                        const res = await fetch(`${API_BASE}/bom/items/reorder`, {
+                        const res = await fetch(`${API_BASE}/products/${productId}/bom-versions/${activeVersion.id}/items/reorder`, {
                             method: 'PUT',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify(reorderData),
@@ -1355,6 +1548,13 @@
                     }
                     return null;
                 });
+
+                const getProductId = () => {
+                    if (currentProductId.value) return currentProductId.value;
+                    if (selectedItem.value?.type === 'product') return selectedItem.value.data.id;
+                    if (selectedItem.value?.type === 'bom_version') return selectedItem.value.data.product_id;
+                    return null;
+                };
 
                 const formatDate = (dateStr) => {
                     if (!dateStr) return '-';
@@ -1399,16 +1599,17 @@
                 }));
 
                 const customImageUpload = async (params, item) => {
-                    if (!item || !item.id) {
+                    if (!item || !item.id || !item.bom_version_id) {
                         ElMessage.error('物料信息丢失，无法上传');
                         return;
                     }
 
+                    const productId = getProductId();
                     const formData = new FormData();
                     formData.append('file', params.file);
 
                     try {
-                        const response = await fetch(`${API_BASE}/bom/items/${item.id}/upload-picture`, {
+                        const response = await fetch(`${API_BASE}/products/${productId}/bom-versions/${item.bom_version_id}/items/${item.id}/upload-picture`, {
                             method: 'POST',
                             body: formData,
                         });
@@ -1456,8 +1657,9 @@
                     docChangelogVisible.value = true;
                     docChangelogLoading.value = true;
                     docChangelogData.value = [];
+                    const productId = getProductId();
                     try {
-                        const res = await fetch(`${API_BASE}/documents/${doc.id}/changelog`);
+                        const res = await fetch(`${API_BASE}/products/${productId}/documents/${doc.id}/versions`);
                         if (res.ok) {
                             docChangelogData.value = await res.json();
                         }
@@ -1507,16 +1709,21 @@
                 };
 
                 // ========== 产品编辑弹窗 ==========
-                const openEditProductDialog = () => {
+                const openEditProductDialog = async () => {
+                    try {
+                        const res = await fetch(`${API_BASE}/customers`);
+                        if (res.ok) customers.value = await res.json();
+                    } catch (e) { console.error("加载客户列表失败:", e); }
+                    
                     editProductForm.value = {
                         id: selectedItem.value.data.id,
                         name: selectedItem.value.data.name,
-                        customer_name: selectedItem.value.data.customer_name || ''
+                        customer_id: selectedItem.value.data.customer_id || null
                     };
                     editProductDialogVisible.value = true;
                 };
                 const saveEditProduct = async () => {
-                    if (!editProductForm.value.name || !editProductForm.value.customer_name) {
+                    if (!editProductForm.value.name || !editProductForm.value.customer_id) {
                         ElMessage.warning('客户名称和产品名称不能为空');
                         return;
                     }
@@ -1526,7 +1733,7 @@
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
                                 name: editProductForm.value.name,
-                                customer_name: editProductForm.value.customer_name
+                                customer_id: editProductForm.value.customer_id
                             })
                         });
                         await handleApiError(res);
@@ -1552,8 +1759,9 @@
                 };
                 const saveBomVersionCode = async (bv) => {
                     if (!tempBomVersionCode.value.trim()) return;
+                    const productId = getProductId();
                     try {
-                        const res = await fetch(`${API_BASE}/bom/versions/${bv.id}`, {
+                        const res = await fetch(`${API_BASE}/products/${productId}/bom-versions/${bv.id}`, {
                             method: 'PUT',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ version_code: tempBomVersionCode.value })
@@ -1569,10 +1777,44 @@
                 const fetchProducts = async () => {
                     try {
                         const res = await fetch(`${API_BASE}/products/`);
-                        treeData.value = await res.json();
+                        const data = await res.json();
+                        treeData.value = data;
+                        products.value = data;
+                        if (data.length > 0 && !currentProductId.value) {
+                            currentProductId.value = data[0].id;
+                        }
                     } catch (e) {
                         ElMessage.error('加载产品列表失败');
                         treeData.value = [];
+                        products.value = [];
+                    }
+                };
+
+                const handleProductChange = async (productId) => {
+                    if (!productId) return;
+                    const product = products.value.find(p => p.id === productId);
+                    if (product) {
+                        selectedItem.value = { type: 'product', data: product };
+                        bomItems.value = [];
+                        productBomVersions.value = [];
+                        try {
+                            const res = await fetch(`${API_BASE}/products/${productId}/documents`);
+                            if (res.ok) globalDocuments.value = await res.json();
+                        } catch (e) { globalDocuments.value = []; }
+                        try {
+                            const res = await fetch(`${API_BASE}/products/${productId}/bom-versions`);
+                            if (res.ok) {
+                                productBomVersions.value = await res.json();
+                                const activeVersion = productBomVersions.value.find(v => v.status === 'active');
+                                if (activeVersion) {
+                                    const itemsRes = await fetch(`${API_BASE}/products/${productId}/bom-versions/${activeVersion.id}/items`);
+                                    if (itemsRes.ok) bomItems.value = sanitizeBomItems(await itemsRes.json());
+                                }
+                            }
+                        } catch (e) { productBomVersions.value = []; }
+                        loadGanttTasks();
+                        loadTrackerTasks();
+                        loadProjects();
                     }
                 };
 
@@ -1604,22 +1846,23 @@
                     }
                     if (data.type === 'bom_version') {
                         selectedItem.value = { type: 'bom_version', data };
+                        currentProductId.value = data.product_id;
                         bomItems.value = [];
                         aggregatedLogs.value = [];
                         try {
-                            const res = await fetch(`${API_BASE}/bom/items/?bom_version_id=${data.id}`);
+                            const res = await fetch(`${API_BASE}/products/${data.product_id}/bom-versions/${data.id}/items`);
                             if (!res.ok) throw new Error(`HTTP ${res.status}`);
                             bomItems.value = sanitizeBomItems(await res.json());
                         } catch (e) {
                             ElMessage.error('加载物料清单失败');
                         }
-                        // 自动加载聚合变更日志
                         try {
-                            const res3 = await fetch(`${API_BASE}/bom/versions/${data.id}/aggregated-changelogs`);
+                            const res3 = await fetch(`${API_BASE}/products/${data.product_id}/bom-versions/${data.id}/changelog`);
                             if (res3.ok) aggregatedLogs.value = await res3.json();
                         } catch (e) { aggregatedLogs.value = []; }
                     } else {
                         selectedItem.value = { type: 'product', data };
+                        currentProductId.value = data.id;
                         bomItems.value = [];
                         productBomVersions.value = [];
                         try {
@@ -1635,7 +1878,7 @@
                                 productBomVersions.value = await res.json();
                                 const activeVersion = productBomVersions.value.find(v => v.status === 'active');
                                 if (activeVersion) {
-                                    const itemsRes = await fetch(`${API_BASE}/bom/items/?bom_version_id=${activeVersion.id}`);
+                                    const itemsRes = await fetch(`${API_BASE}/products/${data.id}/bom-versions/${activeVersion.id}/items`);
                                     if (itemsRes.ok) bomItems.value = sanitizeBomItems(await itemsRes.json());
                                 }
                             }
@@ -1730,6 +1973,12 @@
                         return;
                     }
                     try {
+                        const targetItem = bomItems.value.find(i => i.id === updateComponentForm.value.id);
+                        if (!targetItem || !targetItem.bom_version_id) {
+                            ElMessage.error('物料信息丢失');
+                            return;
+                        }
+                        const productId = getProductId();
                         const payload = {
                             google_drive_id: extractDriveId(updateComponentForm.value.google_drive_id),
                             update_notes: updateComponentForm.value.update_notes
@@ -1737,7 +1986,7 @@
                         if (updateComponentForm.value.picture_drive_id) {
                             payload.picture_drive_id = extractDriveId(updateComponentForm.value.picture_drive_id);
                         }
-                        const res = await fetch(`${API_BASE}/bom/items/${updateComponentForm.value.id}`, {
+                        const res = await fetch(`${API_BASE}/products/${productId}/bom-versions/${targetItem.bom_version_id}/items/${updateComponentForm.value.id}`, {
                             method: 'PUT',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify(payload)
@@ -1746,7 +1995,7 @@
                         ElMessage.success('部件版本更新成功');
                         updateComponentDialogVisible.value = false;
                         if (selectedItem.value?.type === 'bom_version') {
-                            const res2 = await fetch(`${API_BASE}/bom/items/?bom_version_id=${selectedItem.value.data.id}`);
+                            const res2 = await fetch(`${API_BASE}/products/${productId}/bom-versions/${selectedItem.value.data.id}/items`);
                             bomItems.value = sanitizeBomItems(await res2.json());
                         }
                     } catch (e) {
@@ -1759,8 +2008,9 @@
                     componentHistoryData.value = [];
                     componentHistoryLoading.value = true;
                     componentHistoryDialogVisible.value = true;
+                    const productId = getProductId();
                     try {
-                        const res = await fetch(`${API_BASE}/bom/items/${item.id}/changelog`);
+                        const res = await fetch(`${API_BASE}/products/${productId}/bom-versions/${item.bom_version_id}/items/${item.id}/changelog`);
                         const logs = await res.json();
                         componentHistoryData.value = logs.map(log => {
                             let details = {};
@@ -1780,11 +2030,12 @@
                         type: 'warning',
                     }).then(async () => {
                         try {
-                            const res = await fetch(`${API_BASE}/bom/items/${item.id}`, { method: 'DELETE' });
+                            const productId = getProductId();
+                            const res = await fetch(`${API_BASE}/products/${productId}/bom-versions/${item.bom_version_id}/items/${item.id}`, { method: 'DELETE' });
                             await handleApiError(res);
                             ElMessage.success('部件删除成功');
                             if (selectedItem.value?.type === 'bom_version') {
-                                const res2 = await fetch(`${API_BASE}/bom/items/?bom_version_id=${selectedItem.value.data.id}`);
+                                const res2 = await fetch(`${API_BASE}/products/${productId}/bom-versions/${selectedItem.value.data.id}/items`);
                                 bomItems.value = sanitizeBomItems(await res2.json());
                             }
                         } catch (e) {
@@ -1807,10 +2058,11 @@
                         return;
                     }
 
+                    const productId = getProductId();
                     try {
                         let res;
                         if (dialogMode.value === 'create') {
-                            res = await fetch(`${API_BASE}/bom/items/`, {
+                            res = await fetch(`${API_BASE}/products/${productId}/bom-versions/${editForm.value.bom_version_id}/items`, {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify(editForm.value)
@@ -1820,7 +2072,7 @@
                                 ElMessage.error('无效的物料 ID');
                                 return;
                             }
-                            res = await fetch(`${API_BASE}/bom/items/${editForm.value.id}`, {
+                            res = await fetch(`${API_BASE}/products/${productId}/bom-versions/${editForm.value.bom_version_id}/items/${editForm.value.id}`, {
                                 method: 'PUT',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify(editForm.value)
@@ -1832,8 +2084,9 @@
                         editDialogVisible.value = false;
                         if (selectedItem.value?.type === 'bom_version' && selectedItem.value.data.id) {
                             const versionId = selectedItem.value.data.id;
-                            const itemsRes = await fetch(`${API_BASE}/bom/items/?bom_version_id=${versionId}`);
+                            const itemsRes = await fetch(`${API_BASE}/products/${productId}/bom-versions/${versionId}/items`);
                             if (itemsRes.ok) bomItems.value = sanitizeBomItems(await itemsRes.json());
+                            await loadAggregatedChangelogs();
                         }
                     } catch (e) {
                         console.error("操作中断:", e);
@@ -1861,6 +2114,8 @@
                     try {
                         const payload = {
                             version_code: bomVersionForm.value.version_code,
+                            bom_type: bomVersionForm.value.bom_type || 'engineering',
+                            variant_tag: bomVersionForm.value.variant_tag || '',
                             change_notes: bomVersionForm.value.change_notes
                         };
                         const res = await fetch(`${API_BASE}/products/${selectedItem.value.data.id}/bom-versions`, {
@@ -1896,23 +2151,42 @@
                         return;
                     }
 
+                    const productId = getProductId();
                     try {
-                        const payload = {
-                            product_id: selectedItem.value.data.id,
-                            bom_item_id: null,
-                            ...documentForm.value,
-                            google_drive_id: extractDriveId(documentForm.value.google_drive_id)
+                        const docPayload = {
+                            title: documentForm.value.title,
+                            document_type: documentForm.value.document_type,
+                            category: null,
+                            status: 'active'
                         };
-                        const res = await fetch(`${API_BASE}/documents/`, {
+                        const res = await fetch(`${API_BASE}/products/${productId}/documents`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(payload)
+                            body: JSON.stringify(docPayload)
                         });
 
                         await handleApiError(res);
+                        const document = await res.json();
+
+                        if (documentForm.value.version || documentForm.value.google_drive_id) {
+                            const versionPayload = {
+                                version_number: documentForm.value.version || '1.0',
+                                received_date: documentForm.value.received_date,
+                                google_drive_id: extractDriveId(documentForm.value.google_drive_id),
+                                file_name: documentForm.value.title,
+                                update_notes: documentForm.value.update_notes
+                            };
+                            const verRes = await fetch(`${API_BASE}/products/${productId}/documents/${document.id}/versions`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify(versionPayload)
+                            });
+                            await handleApiError(verRes);
+                        }
+
                         ElMessage.success('文件添加成功');
                         documentDialogVisible.value = false;
-                        const res2 = await fetch(`${API_BASE}/products/${selectedItem.value.data.id}/documents`);
+                        const res2 = await fetch(`${API_BASE}/products/${productId}/documents`);
                         globalDocuments.value = await res2.json();
                     } catch (e) {
                         console.error("操作中断:", e);
@@ -1921,6 +2195,13 @@
 
                 const previewDocument = (doc) => {
                     const driveId = extractDriveId(doc.google_drive_id);
+                    previewUrl.value = `https://drive.google.com/file/d/${driveId}/preview`;
+                    previewViewUrl.value = `https://drive.google.com/file/d/${driveId}/view`;
+                    previewDialogVisible.value = true;
+                };
+
+                const previewDocumentVersion = (doc, version) => {
+                    const driveId = extractDriveId(version.google_drive_id);
                     previewUrl.value = `https://drive.google.com/file/d/${driveId}/preview`;
                     previewViewUrl.value = `https://drive.google.com/file/d/${driveId}/view`;
                     previewDialogVisible.value = true;
@@ -1946,14 +2227,14 @@
                         return;
                     }
 
+                    const productId = getProductId();
                     try {
                         const payload = {
-                            version: updateDocumentForm.value.current_version,
                             google_drive_id: extractDriveId(updateDocumentForm.value.google_drive_id),
                             update_notes: updateDocumentForm.value.update_notes
                         };
-                        const res = await fetch(`${API_BASE}/documents/${updateDocumentForm.value.id}`, {
-                            method: 'PUT',
+                        const res = await fetch(`${API_BASE}/products/${productId}/documents/${updateDocumentForm.value.id}/versions`, {
+                            method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify(payload)
                         });
@@ -1961,7 +2242,7 @@
                         await handleApiError(res);
                         ElMessage.success('文件更新成功');
                         updateDocumentDialogVisible.value = false;
-                        const res2 = await fetch(`${API_BASE}/products/${selectedItem.value.data.id}/documents`);
+                        const res2 = await fetch(`${API_BASE}/products/${productId}/documents`);
                         globalDocuments.value = await res2.json();
                     } catch (e) {
                         console.error("操作中断:", e);
@@ -1987,13 +2268,14 @@
                         ElMessage.warning('请输入版本号');
                         return;
                     }
+                    const productId = getProductId();
                     try {
                         const payload = {
                             title: editDocumentForm.value.title,
                             version: editDocumentForm.value.version,
                             update_notes: editDocumentForm.value.update_notes
                         };
-                        const res = await fetch(`${API_BASE}/documents/${editDocumentForm.value.id}`, {
+                        const res = await fetch(`${API_BASE}/products/${productId}/documents/${editDocumentForm.value.id}`, {
                             method: 'PUT',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify(payload)
@@ -2002,7 +2284,7 @@
                         await handleApiError(res);
                         ElMessage.success('文件信息更新成功');
                         editDocumentDialogVisible.value = false;
-                        const res2 = await fetch(`${API_BASE}/products/${selectedItem.value.data.id}/documents`);
+                        const res2 = await fetch(`${API_BASE}/products/${productId}/documents`);
                         globalDocuments.value = await res2.json();
                     } catch (e) {
                         console.error("操作中断:", e);
@@ -2010,14 +2292,15 @@
                 };
 
                 const deleteDocument = async (doc) => {
+                    const productId = getProductId();
                     try {
-                        const res = await fetch(`${API_BASE}/documents/${doc.id}`, {
+                        const res = await fetch(`${API_BASE}/products/${productId}/documents/${doc.id}`, {
                             method: 'DELETE'
                         });
 
                         await handleApiError(res);
                         ElMessage.success('文件删除成功');
-                        const res2 = await fetch(`${API_BASE}/products/${selectedItem.value.data.id}/documents`);
+                        const res2 = await fetch(`${API_BASE}/products/${productId}/documents`);
                         globalDocuments.value = await res2.json();
                     } catch (e) {
                         console.error("操作中断:", e);
@@ -2051,14 +2334,15 @@
                         return;
                     }
                     const target = bomItems.value.find(i => i.id === form.item_id);
-                    if (!target) return;
+                    if (!target || !target.bom_version_id) return;
                     const newFiles = [...(target.design_files || []), {
                         file_type: form.file_type,
                         drive_id: extractDriveId(form.drive_id),
                         version: form.version || 'v1',
                     }];
+                    const productId = getProductId();
                     try {
-                        const res = await fetch(`${API_BASE}/bom/items/${form.item_id}`, {
+                        const res = await fetch(`${API_BASE}/products/${productId}/bom-versions/${target.bom_version_id}/items/${form.item_id}`, {
                             method: 'PUT',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ design_files: newFiles }),
@@ -2096,15 +2380,16 @@
                         return;
                     }
                     const target = bomItems.value.find(i => i.id === form.item_id);
-                    if (!target) return;
+                    if (!target || !target.bom_version_id) return;
                     const newFiles = JSON.parse(JSON.stringify(target.design_files || []));
                     newFiles[form.file_index] = {
                         ...newFiles[form.file_index],
                         drive_id: extractDriveId(form.drive_id),
                         version: form.version || newFiles[form.file_index].version,
                     };
+                    const productId = getProductId();
                     try {
-                        const res = await fetch(`${API_BASE}/bom/items/${form.item_id}`, {
+                        const res = await fetch(`${API_BASE}/products/${productId}/bom-versions/${target.bom_version_id}/items/${form.item_id}`, {
                             method: 'PUT',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ design_files: newFiles }),
@@ -2138,8 +2423,9 @@
                 };
 
                 const activateBomVersion = async (versionId) => {
+                    const productId = getProductId();
                     try {
-                        const res = await fetch(`${API_BASE}/bom/versions/${versionId}/activate`, { method: 'PATCH' });
+                        const res = await fetch(`${API_BASE}/products/${productId}/bom-versions/${versionId}/release`, { method: 'PATCH' });
                         await handleApiError(res);
                         ElMessage.success('版本已启用');
                         await refreshBomVersions();
@@ -2147,8 +2433,9 @@
                 };
 
                 const archiveBomVersion = async (versionId) => {
+                    const productId = getProductId();
                     try {
-                        const res = await fetch(`${API_BASE}/bom/versions/${versionId}/archive`, { method: 'PATCH' });
+                        const res = await fetch(`${API_BASE}/products/${productId}/bom-versions/${versionId}/archive`, { method: 'PATCH' });
                         await handleApiError(res);
                         ElMessage.success('版本已封存');
                         await refreshBomVersions();
@@ -2157,8 +2444,9 @@
 
                 const confirmDeleteBomVersion = (bv) => {
                     ElMessageBox.confirm(`确定要删除 BOM 版本 "${bv.version_code}" 吗？该操作将级联删除其下所有物料数据，不可恢复！`, '危险操作', { type: 'warning', confirmButtonText: '确定删除', cancelButtonText: '取消' }).then(async () => {
+                        const productId = getProductId();
                         try {
-                            const res = await fetch(`${API_BASE}/bom/versions/${bv.id}`, { method: 'DELETE' });
+                            const res = await fetch(`${API_BASE}/products/${productId}/bom-versions/${bv.id}`, { method: 'DELETE' });
                             await handleApiError(res);
                             ElMessage.success('版本已删除');
                             await refreshBomVersions();
@@ -2179,9 +2467,10 @@
                 // ========== 聚合变更日志 ==========
                 const loadAggregatedChangelogs = async () => {
                     if (selectedItem.value?.type !== 'bom_version') return;
+                    const productId = getProductId();
                     const versionId = selectedItem.value.data.id;
                     try {
-                        const res = await fetch(`${API_BASE}/bom/versions/${versionId}/aggregated-changelogs`);
+                        const res = await fetch(`${API_BASE}/products/${productId}/bom-versions/${versionId}/changelog`);
                         if (res.ok) aggregatedLogs.value = await res.json();
                         else aggregatedLogs.value = [];
                     } catch (e) { aggregatedLogs.value = []; }
@@ -2189,8 +2478,10 @@
 
                 const saveChangeLogNote = async (row) => {
                     if (!row.id) return;
+                    const productId = getProductId();
+                    const versionId = selectedItem.value?.data?.id;
                     try {
-                        const res = await fetch(`${API_BASE}/bom/changelogs/${row.id}/note`, {
+                        const res = await fetch(`${API_BASE}/products/${productId}/bom-versions/${versionId}/changelog/${row.id}`, {
                             method: 'PUT',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ manual_note: row.manual_note || '' })
@@ -2228,10 +2519,148 @@
                     if (!selectedItem.value || selectedItem.value.type !== 'product') return;
                     const productId = selectedItem.value.data.id;
                     try {
-                        const res = await fetch(`${API_BASE}/api/products/${productId}/gantt-tasks`);
+                        const res = await fetch(`${API_BASE}/products/${productId}/gantt-tasks`);
                         if (res.ok) ganttTasks.value = await res.json();
                         else ganttTasks.value = [];
                     } catch (e) { ganttTasks.value = []; }
+                };
+
+                const loadProjects = async () => {
+                    const productId = getProductId();
+                    if (!productId) return;
+                    try {
+                        const res = await fetch(`${API_BASE}/products/${productId}/projects`);
+                        if (res.ok) {
+                            projects.value = await res.json();
+                            if (projects.value.length > 0 && !selectedProjectId.value) {
+                                selectedProjectId.value = projects.value[0].id;
+                            } else if (projects.value.length === 0) {
+                                selectedProjectId.value = null;
+                            }
+                        }
+                    } catch (e) { projects.value = []; }
+                };
+
+                const openCreateProjectDialog = () => {
+                    projectFormData.value = {
+                        name: '',
+                        code: '',
+                        pm: '',
+                        sales: '',
+                        ee: '',
+                        me: ''
+                    };
+                    createProjectDialogVisible.value = true;
+                };
+
+                const saveProject = async () => {
+                    const productId = getProductId();
+                    if (!productId) {
+                        ElMessage.warning('请先选择产品');
+                        return;
+                    }
+                    if (!projectFormData.value.name || !projectFormData.value.code) {
+                        ElMessage.warning('项目名称和编码不能为空');
+                        return;
+                    }
+                    try {
+                        const res = await fetch(`${API_BASE}/products/${productId}/projects`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                name: projectFormData.value.name,
+                                code: projectFormData.value.code,
+                                pm: projectFormData.value.pm,
+                                sales: projectFormData.value.sales,
+                                ee: projectFormData.value.ee,
+                                me: projectFormData.value.me,
+                                status: 'active'
+                            })
+                        });
+                        await handleApiError(res);
+                        const newProject = await res.json();
+                        ElMessage.success('项目创建成功');
+                        await loadProjects();
+                        selectedProjectId.value = newProject.id;
+                        createProjectDialogVisible.value = false;
+                    } catch (e) {
+                        console.error("创建项目失败:", e);
+                    }
+                };
+
+                const loadTrackerTasks = async () => {
+                    const productId = getProductId();
+                    if (!productId) return;
+                    try {
+                        const res = await fetch(`${API_BASE}/products/${productId}/tracker-tasks`);
+                        if (res.ok) trackerTasks.value = await res.json();
+                        else trackerTasks.value = [];
+                    } catch (e) { trackerTasks.value = []; }
+                };
+
+                const loadNPICategories = async () => {
+                    try {
+                        const res = await fetch(`${API_BASE}/api/npi-categories`);
+                        if (res.ok) npiCategories.value = await res.json();
+                        else npiCategories.value = [];
+                    } catch (e) { npiCategories.value = []; }
+                };
+
+                const syncToGantt = async (task) => {
+                    if (!task || task.gantt_task_id) {
+                        ElMessage.warning('该任务已同步至甘特图');
+                        return;
+                    }
+                    const productId = getProductId();
+                    try {
+                        const res = await fetch(`${API_BASE}/products/${productId}/tracker-tasks/${task.id}/sync-to-gantt`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                start_date: task.start_date,
+                                duration: task.planned_days || 1,
+                                assignee: task.owner
+                            })
+                        });
+                        await handleApiError(res);
+                        const result = await res.json();
+                        ElMessage.success(`已同步至甘特图，任务ID: ${result.gantt_task_id}`);
+                        await loadTrackerTasks();
+                        await loadGanttTasks();
+                    } catch (e) { console.error("同步失败:", e); }
+                };
+
+                const initTrackerStage = async (stage) => {
+                    const productId = getProductId();
+                    if (!selectedProjectId.value) {
+                        ElMessage.error('请先选择项目，若没有项目请先创建');
+                        return;
+                    }
+                    try {
+                        const res = await fetch(`${API_BASE}/products/${productId}/tracker-tasks/init-stage`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ stage, project_id: selectedProjectId.value })
+                        });
+                        await handleApiError(res);
+                        const result = await res.json();
+                        ElMessage.success(`已初始化 ${result.length} 个 ${stage} 阶段任务`);
+                        await loadTrackerTasks();
+                    } catch (e) { console.error("初始化失败:", e); }
+                };
+
+                const updateTrackerTask = async (task) => {
+                    const productId = getProductId();
+                    try {
+                        const res = await fetch(`${API_BASE}/products/${productId}/tracker-tasks/${task.id}`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(task)
+                        });
+                        await handleApiError(res);
+                        ElMessage.success('任务更新成功');
+                        await loadTrackerTasks();
+                    } catch (e) { console.error("更新失败:", e); }
                 };
 
                 const loadSysHolidays = async () => {
@@ -2318,7 +2747,8 @@
                         },
                         on_date_change: async (task, start, end) => {
                             try {
-                                const res = await fetch(`${API_BASE}/api/gantt-tasks/${task.id}`, {
+                                const productId = getProductId();
+                                const res = await fetch(`${API_BASE}/products/${productId}/gantt-tasks/${task.id}`, {
                                     method: 'PUT',
                                     headers: { 'Content-Type': 'application/json' },
                                     body: JSON.stringify({ start_date: start, end_date: end })
@@ -2331,7 +2761,8 @@
                         },
                         on_progress_change: async (task, progress) => {
                             try {
-                                const res = await fetch(`${API_BASE}/api/gantt-tasks/${task.id}`, {
+                                const productId = getProductId();
+                                const res = await fetch(`${API_BASE}/products/${productId}/gantt-tasks/${task.id}`, {
                                     method: 'PUT',
                                     headers: { 'Content-Type': 'application/json' },
                                     body: JSON.stringify({ progress: progress })
@@ -2381,6 +2812,10 @@
                         ElMessage.error('请先选择产品');
                         return;
                     }
+                    if (!selectedProjectId.value) {
+                        ElMessage.error('请先选择项目，若没有项目请先创建');
+                        return;
+                    }
                     
                     const endDate = calculateEndDate(
                         ganttTaskForm.value.start_date,
@@ -2393,11 +2828,10 @@
                         return;
                     }
                     
+                    const productId = selectedItem.value.data.id;
                     try {
                         const payload = {
-                            product_id: selectedItem.value.data.id,
-                            text: ganttTaskForm.value.text,
-                            remark: ganttTaskForm.value.remark || '',
+                            task_text: ganttTaskForm.value.text,
                             assignee: ganttTaskForm.value.assignee || '',
                             start_date: ganttTaskForm.value.start_date,
                             end_date: endDate,
@@ -2406,7 +2840,7 @@
                             progress: 0,
                             dependencies: ganttTaskForm.value.dependencies.join(',')
                         };
-                        const res = await fetch(`${API_BASE}/api/gantt-tasks`, {
+                        const res = await fetch(`${API_BASE}/products/${productId}/gantt-tasks`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify(payload)
@@ -2427,6 +2861,7 @@
                         ganttTaskForm.value.duration,
                         ganttTaskForm.value.is_workday_only
                     );
+                    const productId = getProductId();
                     try {
                         const payload = {
                             text: ganttTaskForm.value.text,
@@ -2438,7 +2873,7 @@
                             is_workday_only: ganttTaskForm.value.is_workday_only,
                             dependencies: ganttTaskForm.value.dependencies.join(',')
                         };
-                        const res = await fetch(`${API_BASE}/api/gantt-tasks/${ganttTaskForm.value.id}`, {
+                        const res = await fetch(`${API_BASE}/products/${productId}/gantt-tasks/${ganttTaskForm.value.id}`, {
                             method: 'PUT',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify(payload)
@@ -2523,6 +2958,8 @@
                     fetchProducts();
                     loadSysHolidays();
                     loadTaskTemplates();
+                    loadNPICategories();
+                    loadTrackerTasks();
                 });
 
                 return {
@@ -2581,6 +3018,7 @@
                     createProduct,
                     editProductDialogVisible,
                     editProductForm,
+                    customers,
                     openEditProductDialog,
                     saveEditProduct,
                     editingBomVersionCode,
@@ -2657,7 +3095,25 @@
                     confirmAddDesignFile,
                     openUpdateDesignFileDialog,
                     confirmUpdateDesignFile,
-                    previewDesignFile
+                    previewDesignFile,
+                    products,
+                    currentProductId,
+                    handleProductChange,
+                    trackerTasks,
+                    activeTrackerStage,
+                    trackerStages,
+                    npiCategories,
+                    projects,
+                    selectedProjectId,
+                    createProjectDialogVisible,
+                    projectFormData,
+                    openCreateProjectDialog,
+                    saveProject,
+                    loadTrackerTasks,
+                    loadNPICategories,
+                    syncToGantt,
+                    initTrackerStage,
+                    updateTrackerTask
                 };
             }
         });
