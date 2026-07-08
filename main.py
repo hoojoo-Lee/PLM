@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 import os
 
 from fastapi import Depends, FastAPI
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 
@@ -34,7 +35,7 @@ app.add_middleware(
 
 @app.get("/", tags=["Health"])
 def read_root():
-    return {"status": "ok", "message": "PLM backend is running."}
+    return FileResponse("index.html")
 
 
 @app.get("/health", tags=["Health"])

@@ -84,6 +84,9 @@ class CustomerBase(BaseSchema):
     company_scale: Optional[str] = Field(None, max_length=50)
     location: Optional[str] = Field(None, max_length=100)
     pm_contact: Optional[str] = Field(None, max_length=100)
+    contact_name: Optional[str] = Field(None, max_length=100)
+    contact_email: Optional[str] = Field(None, max_length=200)
+    background_notes: Optional[str] = None
     status: str = Field(default="active", max_length=20)
     tier: Optional[str] = Field(None, max_length=20)
 
@@ -101,6 +104,9 @@ class CustomerUpdate(BaseSchema):
     company_scale: Optional[str] = Field(None, max_length=50)
     location: Optional[str] = Field(None, max_length=100)
     pm_contact: Optional[str] = Field(None, max_length=100)
+    contact_name: Optional[str] = Field(None, max_length=100)
+    contact_email: Optional[str] = Field(None, max_length=200)
+    background_notes: Optional[str] = None
     status: Optional[str] = Field(None, max_length=20)
     tier: Optional[str] = Field(None, max_length=20)
 
@@ -261,7 +267,7 @@ class BOMItemBase(BaseSchema):
     responsible: Optional[str] = Field(None, max_length=100)
     design_finalization: Optional[str] = Field(None, max_length=50)
     picture_drive_id: Optional[str] = Field(None, max_length=200)
-    design_files: Optional[list[str]] = Field(default_factory=list)
+    design_files: Optional[list[dict[str, Any]]] = Field(default_factory=list)
     item_specific_data: Optional[dict[str, Any]] = Field(default_factory=dict)
     sample_no: Optional[str] = Field(None, max_length=50)
     qc_sample: bool = Field(default=False)
@@ -287,7 +293,7 @@ class BOMItemUpdate(BaseSchema):
     responsible: Optional[str] = Field(None, max_length=100)
     design_finalization: Optional[str] = Field(None, max_length=50)
     picture_drive_id: Optional[str] = Field(None, max_length=200)
-    design_files: Optional[list[str]] = None
+    design_files: Optional[list[dict[str, Any]]] = None
     item_specific_data: Optional[dict[str, Any]] = None
     sample_no: Optional[str] = Field(None, max_length=50)
     qc_sample: Optional[bool] = None
@@ -326,6 +332,7 @@ class ProjectBase(BaseSchema):
     current_stage: str = Field(default="S0", max_length=20)
     goal: Optional[str] = None
     control_book_link: Optional[str] = Field(None, max_length=200)
+    basecamp_url: Optional[str] = Field(None, max_length=500)
     status: str = Field(default="active", max_length=20)
     start_date: Optional[date] = None
     target_mp_date: Optional[date] = None
@@ -345,6 +352,7 @@ class ProjectUpdate(BaseSchema):
     current_stage: Optional[str] = Field(None, max_length=20)
     goal: Optional[str] = None
     control_book_link: Optional[str] = Field(None, max_length=200)
+    basecamp_url: Optional[str] = Field(None, max_length=500)
     status: Optional[str] = Field(None, max_length=20)
     start_date: Optional[date] = None
     target_mp_date: Optional[date] = None

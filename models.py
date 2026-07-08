@@ -75,6 +75,9 @@ class Customer(Base):
     company_scale = Column(String(50), comment="公司规模")
     location = Column(String(100), comment="所在地")
     pm_contact = Column(String(100), comment="PM对接人")
+    contact_name = Column(String(100), nullable=True, comment="联系人")
+    contact_email = Column(String(200), nullable=True, comment="联系邮箱")
+    background_notes = Column(Text, nullable=True, comment="客户背景与特殊要求")
     status = Column(String(20), server_default=text("'active'"), comment="合作状态: active/inactive/archived")
     tier = Column(String(20), comment="客户等级")
     created_at = Column(DateTime(timezone=True), server_default=text("now()"))
@@ -241,6 +244,7 @@ class Project(Base):
     current_stage = Column(String(20), server_default=text("'S0'"), comment="当前阶段: S0-S6")
     goal = Column(Text, comment="项目目标")
     control_book_link = Column(String(200), comment="Control Book链接")
+    basecamp_url = Column(String(500), nullable=True, comment="项目链接(Basecamp等)")
     
     status = Column(String(20), server_default=text("'active'"), comment="状态: active/completed/hold/cancelled")
     start_date = Column(Date, comment="开始日期")

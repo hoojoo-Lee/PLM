@@ -100,9 +100,14 @@
                                 <el-icon><FolderOpened class="w-4 h-4 mr-2 text-gray-400" /></el-icon>
                                 客户产品
                             </h2>
-                            <el-button size="small" type="primary" @click="openCreateProductDialog" plain>
-                                <el-icon><Plus class="w-3 h-3" /></el-icon>
-                            </el-button>
+                            <div class="flex items-center space-x-1">
+                                <el-button size="small" @click="customerMgmtVisible = true" plain title="客户管理">
+                                    <el-icon><Setting class="w-3 h-3" /></el-icon>
+                                </el-button>
+                                <el-button size="small" type="primary" @click="openCreateProductDialog" plain>
+                                    <el-icon><Plus class="w-3 h-3" /></el-icon>
+                                </el-button>
+                            </div>
                         </div>
                     </div>
                     <el-tree
@@ -150,10 +155,44 @@
                                     </div>
                                 </div>
                             </template>
-                            <h2 class="text-2xl font-bold text-gray-900 mb-2">{{ selectedItem.data.customer_name ? '[' + selectedItem.data.customer_name + ']' : '' }}{{ selectedItem.data.name }}</h2>
+                            <h2 class="text-2xl font-bold text-gray-900 mb-2">{{ getFormattedProductTitle(selectedItem.data) }}</h2>
                         </el-card>
 
                         <el-tabs v-model="activeProductTab" type="card">
+                            <el-tab-pane label="客户与背景" name="customer">
+                                <el-card shadow="hover" v-if="getProductCustomer()">
+                                    <template #header>
+                                        <div class="flex items-center justify-between">
+                                            <span class="font-semibold text-gray-700">{{ getProductCustomer().name }}</span>
+                                            <el-button size="small" type="primary" plain @click="openEditCustomerFromProduct">编辑客户信息</el-button>
+                                        </div>
+                                    </template>
+                                    <div class="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+                                        <div><span class="text-gray-400">行业：</span><span class="text-gray-700">{{ getProductCustomer().industry || '-' }}</span></div>
+                                        <div><span class="text-gray-400">所在地：</span><span class="text-gray-700">{{ getProductCustomer().location || '-' }}</span></div>
+                                        <div><span class="text-gray-400">等级：</span><span class="text-gray-700">{{ getProductCustomer().tier || '-' }}</span></div>
+                                        <div><span class="text-gray-400">PM对接人：</span><span class="text-gray-700">{{ getProductCustomer().pm_contact || '-' }}</span></div>
+                                        <div><span class="text-gray-400">联系人：</span><span class="text-gray-700">{{ getProductCustomer().contact_name || '-' }}</span></div>
+                                        <div><span class="text-gray-400">联系邮箱：</span><span class="text-gray-700">{{ getProductCustomer().contact_email || '-' }}</span></div>
+                                        <div v-if="getProductCustomer().website" class="col-span-2 md:col-span-3">
+                                            <span class="text-gray-400">官网：</span>
+                                            <a :href="getProductCustomer().website" target="_blank" class="text-blue-500 hover:underline">{{ getProductCustomer().website }}</a>
+                                        </div>
+                                    </div>
+                                    <el-divider v-if="getProductCustomer().background_notes" />
+                                    <div v-if="getProductCustomer().background_notes" class="text-sm">
+                                        <span class="text-gray-400 font-semibold">背景与特殊要求：</span>
+                                        <p class="text-gray-600 mt-1 whitespace-pre-wrap">{{ getProductCustomer().background_notes }}</p>
+                                    </div>
+                                    <el-divider v-if="getProductCustomer().background" />
+                                    <div v-if="getProductCustomer().background" class="text-sm">
+                                        <span class="text-gray-400 font-semibold">客户背景：</span>
+                                        <p class="text-gray-600 mt-1 whitespace-pre-wrap">{{ getProductCustomer().background }}</p>
+                                    </div>
+                                </el-card>
+                                <el-empty v-else description="该产品未关联客户，请在产品编辑中绑定客户" />
+                            </el-tab-pane>
+
                             <el-tab-pane label="BOM 视图" name="bom">
                                 <div class="space-y-6">
                                     <el-card shadow="hover">
@@ -319,6 +358,7 @@
                                                 <el-select v-model="selectedProjectId" placeholder="选择项目" @change="loadTrackerTasks" style="width: 200px">
                                                     <el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" />
                                                 </el-select>
+                                                <el-button v-if="getCurrentProjectUrl()" type="primary" link tag="a" :href="getCurrentProjectUrl()" target="_blank">🔗 Basecamp</el-button>
                                                 <el-button type="primary" link size="small" @click="openCreateProjectDialog">+ 新建项目</el-button>
                                                 <span v-if="projects.length === 0" class="text-xs text-red-500">请先创建项目</span>
                                             </div>
@@ -386,6 +426,7 @@
                                             <el-select v-model="selectedProjectId" placeholder="选择项目" style="width: 200px">
                                                 <el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" />
                                             </el-select>
+                                            <el-button v-if="getCurrentProjectUrl()" type="primary" link tag="a" :href="getCurrentProjectUrl()" target="_blank">🔗 Basecamp</el-button>
                                             <el-button type="primary" link size="small" @click="openCreateProjectDialog">+ 新建项目</el-button>
                                             <span v-if="projects.length === 0" class="text-xs text-red-500">请先创建项目</span>
                                         </div>
@@ -873,6 +914,111 @@
             </template>
         </el-dialog>
 
+        <el-dialog v-model="customerMgmtVisible" title="客户管理" width="700px">
+            <el-table :data="customers" border size="small" max-height="300">
+                <el-table-column prop="name" label="客户名称" min-width="120" />
+                <el-table-column prop="contact_name" label="联系人" width="100" />
+                <el-table-column prop="contact_email" label="邮箱" width="140" />
+                <el-table-column prop="industry" label="行业" width="90" />
+                <el-table-column prop="tier" label="等级" width="60" />
+                <el-table-column label="操作" width="80" fixed="right">
+                    <template #default="{ row }">
+                        <el-button type="primary" link size="small" @click="openEditCustomerDialog(row)">编辑</el-button>
+                    </template>
+                </el-table-column>
+            </el-table>
+            <el-divider>新增客户</el-divider>
+            <el-form :model="newCustomerForm" label-width="80px" size="small">
+                <div class="grid grid-cols-2 gap-x-4">
+                    <el-form-item label="名称" required>
+                        <el-input v-model="newCustomerForm.name" placeholder="客户名称" />
+                    </el-form-item>
+                    <el-form-item label="PM对接人">
+                        <el-input v-model="newCustomerForm.pm_contact" placeholder="PM对接人" />
+                    </el-form-item>
+                    <el-form-item label="联系人">
+                        <el-input v-model="newCustomerForm.contact_name" placeholder="客户联系人" />
+                    </el-form-item>
+                    <el-form-item label="联系邮箱">
+                        <el-input v-model="newCustomerForm.contact_email" placeholder="email@example.com" />
+                    </el-form-item>
+                    <el-form-item label="行业">
+                        <el-input v-model="newCustomerForm.industry" placeholder="如：半导体" />
+                    </el-form-item>
+                    <el-form-item label="等级">
+                        <el-select v-model="newCustomerForm.tier" placeholder="选择等级" style="width:100%">
+                            <el-option label="S" value="S" />
+                            <el-option label="A" value="A" />
+                            <el-option label="B" value="B" />
+                            <el-option label="C" value="C" />
+                        </el-select>
+                    </el-form-item>
+                    <el-form-item label="所在地">
+                        <el-input v-model="newCustomerForm.location" placeholder="所在城市" />
+                    </el-form-item>
+                    <el-form-item label="官网">
+                        <el-input v-model="newCustomerForm.website" placeholder="https://" />
+                    </el-form-item>
+                </div>
+                <el-form-item label="背景要求">
+                    <el-input v-model="newCustomerForm.background_notes" type="textarea" :rows="2" placeholder="客户背景与特殊要求" />
+                </el-form-item>
+                <el-form-item label="备注">
+                    <el-input v-model="newCustomerForm.background" type="textarea" :rows="2" placeholder="客户背景信息" />
+                </el-form-item>
+            </el-form>
+            <template #footer>
+                <el-button @click="customerMgmtVisible = false">关闭</el-button>
+                <el-button type="primary" @click="createCustomer">新增客户</el-button>
+            </template>
+        </el-dialog>
+
+        <el-dialog v-model="editCustomerDialogVisible" title="编辑客户" width="500px">
+            <el-form :model="editCustomerForm" label-width="80px" size="small">
+                <div class="grid grid-cols-2 gap-x-4">
+                    <el-form-item label="名称" required>
+                        <el-input v-model="editCustomerForm.name" />
+                    </el-form-item>
+                    <el-form-item label="PM对接人">
+                        <el-input v-model="editCustomerForm.pm_contact" />
+                    </el-form-item>
+                    <el-form-item label="联系人">
+                        <el-input v-model="editCustomerForm.contact_name" />
+                    </el-form-item>
+                    <el-form-item label="联系邮箱">
+                        <el-input v-model="editCustomerForm.contact_email" />
+                    </el-form-item>
+                    <el-form-item label="行业">
+                        <el-input v-model="editCustomerForm.industry" />
+                    </el-form-item>
+                    <el-form-item label="等级">
+                        <el-select v-model="editCustomerForm.tier" style="width:100%">
+                            <el-option label="S" value="S" />
+                            <el-option label="A" value="A" />
+                            <el-option label="B" value="B" />
+                            <el-option label="C" value="C" />
+                        </el-select>
+                    </el-form-item>
+                    <el-form-item label="所在地">
+                        <el-input v-model="editCustomerForm.location" />
+                    </el-form-item>
+                    <el-form-item label="官网">
+                        <el-input v-model="editCustomerForm.website" />
+                    </el-form-item>
+                </div>
+                <el-form-item label="背景要求">
+                    <el-input v-model="editCustomerForm.background_notes" type="textarea" :rows="2" />
+                </el-form-item>
+                <el-form-item label="备注">
+                    <el-input v-model="editCustomerForm.background" type="textarea" :rows="2" />
+                </el-form-item>
+            </el-form>
+            <template #footer>
+                <el-button @click="editCustomerDialogVisible = false">取消</el-button>
+                <el-button type="primary" @click="saveEditCustomer">保存</el-button>
+            </template>
+        </el-dialog>
+
         <el-dialog v-model="createProductDialogVisible" title="新增客户产品" width="500px">
             <el-form :model="createProductForm" label-width="100px">
                 <el-form-item label="客户名称" required>
@@ -1188,6 +1334,9 @@
                 <el-form-item label="结构工程师">
                     <el-input v-model="projectFormData.me" placeholder="输入 ME 姓名" />
                 </el-form-item>
+                <el-form-item label="项目链接">
+                    <el-input v-model="projectFormData.basecamp_url" placeholder="请输入 Basecamp 或其他项目链接" />
+                </el-form-item>
             </el-form>
             <template #footer>
                 <el-button @click="createProjectDialogVisible = false">取消</el-button>
@@ -1251,7 +1400,8 @@
                     pm: '',
                     sales: '',
                     ee: '',
-                    me: ''
+                    me: '',
+                    basecamp_url: ''
                 });
                 const ganttTaskForm = ref({
                     id: null,
@@ -1320,6 +1470,11 @@
                 const componentPreviewVisible = ref(false);
                 const componentPreviewUrl = ref('');
                 const componentPreviewViewUrl = ref('');
+
+                const customerMgmtVisible = ref(false);
+                const editCustomerDialogVisible = ref(false);
+                const newCustomerForm = ref({ name: '', pm_contact: '', industry: '', tier: 'B', location: '', website: '', background: '', contact_name: '', contact_email: '', background_notes: '' });
+                const editCustomerForm = ref({ id: null, name: '', pm_contact: '', industry: '', tier: '', location: '', website: '', background: '', contact_name: '', contact_email: '', background_notes: '' });
 
                 const createProductDialogVisible = ref(false);
                 const createProductForm = ref({ name: '', customer_name: '' });
@@ -1708,12 +1863,98 @@
                     }
                 };
 
-                // ========== 产品编辑弹窗 ==========
-                const openEditProductDialog = async () => {
+                // ========== 产品标题格式化 ==========
+                const getFormattedProductTitle = (product) => {
+                    if (!product) return '';
+                    if (product.customer_id) {
+                        const c = customers.value.find(c => c.id === product.customer_id);
+                        if (c) return `[${c.name}] ${product.name}`;
+                    }
+                    if (product.customer_name) return `[${product.customer_name}] ${product.name}`;
+                    return product.name;
+                };
+
+                const loadCustomers = async () => {
                     try {
                         const res = await fetch(`${API_BASE}/customers`);
                         if (res.ok) customers.value = await res.json();
                     } catch (e) { console.error("加载客户列表失败:", e); }
+                };
+
+                // ========== 产品客户上下文 ==========
+                const getProductCustomer = () => {
+                    if (!selectedItem.value || !selectedItem.value.data || !selectedItem.value.data.customer_id) return null;
+                    return customers.value.find(c => c.id === selectedItem.value.data.customer_id) || null;
+                };
+
+                const openEditCustomerFromProduct = () => {
+                    const customer = getProductCustomer();
+                    if (!customer) return;
+                    openEditCustomerDialog(customer);
+                };
+
+                // ========== 客户管理 CRUD ==========
+                const createCustomer = async () => {
+                    if (!newCustomerForm.value.name) {
+                        ElMessage.warning('客户名称不能为空');
+                        return;
+                    }
+                    try {
+                        const res = await fetch(`${API_BASE}/customers`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(newCustomerForm.value)
+                        });
+                        await handleApiError(res);
+                        ElMessage.success('客户创建成功');
+                        newCustomerForm.value = { name: '', pm_contact: '', industry: '', tier: 'B', location: '', website: '', background: '', contact_name: '', contact_email: '', background_notes: '' };
+                        await loadCustomers();
+                    } catch (e) {
+                        console.error("操作中断:", e);
+                    }
+                };
+
+                const openEditCustomerDialog = (customer) => {
+                    editCustomerForm.value = {
+                        id: customer.id,
+                        name: customer.name || '',
+                        pm_contact: customer.pm_contact || '',
+                        industry: customer.industry || '',
+                        tier: customer.tier || '',
+                        location: customer.location || '',
+                        website: customer.website || '',
+                        background: customer.background || '',
+                        contact_name: customer.contact_name || '',
+                        contact_email: customer.contact_email || '',
+                        background_notes: customer.background_notes || ''
+                    };
+                    editCustomerDialogVisible.value = true;
+                };
+
+                const saveEditCustomer = async () => {
+                    if (!editCustomerForm.value.name) {
+                        ElMessage.warning('客户名称不能为空');
+                        return;
+                    }
+                    try {
+                        const { id, ...payload } = editCustomerForm.value;
+                        const res = await fetch(`${API_BASE}/customers/${id}`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload)
+                        });
+                        await handleApiError(res);
+                        ElMessage.success('客户信息已更新');
+                        editCustomerDialogVisible.value = false;
+                        await loadCustomers();
+                    } catch (e) {
+                        console.error("操作中断:", e);
+                    }
+                };
+
+                // ========== 产品编辑弹窗 ==========
+                const openEditProductDialog = async () => {
+                    await loadCustomers();
                     
                     editProductForm.value = {
                         id: selectedItem.value.data.id,
@@ -2525,6 +2766,11 @@
                     } catch (e) { ganttTasks.value = []; }
                 };
 
+                const getCurrentProjectUrl = () => {
+                    const proj = projects.value.find(p => p.id === selectedProjectId.value);
+                    return proj && proj.basecamp_url ? proj.basecamp_url : '';
+                };
+
                 const loadProjects = async () => {
                     const productId = getProductId();
                     if (!productId) return;
@@ -2548,7 +2794,8 @@
                         pm: '',
                         sales: '',
                         ee: '',
-                        me: ''
+                        me: '',
+                        basecamp_url: ''
                     };
                     createProjectDialogVisible.value = true;
                 };
@@ -2574,6 +2821,7 @@
                                 sales: projectFormData.value.sales,
                                 ee: projectFormData.value.ee,
                                 me: projectFormData.value.me,
+                                basecamp_url: projectFormData.value.basecamp_url || null,
                                 status: 'active'
                             })
                         });
@@ -2956,6 +3204,7 @@
                 onMounted(() => {
                     checkApiStatus();
                     fetchProducts();
+                    loadCustomers();
                     loadSysHolidays();
                     loadTaskTemplates();
                     loadNPICategories();
@@ -2989,6 +3238,13 @@
                     componentPreviewVisible,
                     componentPreviewUrl,
                     componentPreviewViewUrl,
+                    customerMgmtVisible,
+                    editCustomerDialogVisible,
+                    newCustomerForm,
+                    editCustomerForm,
+                    createCustomer,
+                    openEditCustomerDialog,
+                    saveEditCustomer,
                     previewComponent,
                     confirmDeleteBomItem,
                     aggregatedLogs,
@@ -3019,6 +3275,10 @@
                     editProductDialogVisible,
                     editProductForm,
                     customers,
+                    getFormattedProductTitle,
+                    loadCustomers,
+                    getProductCustomer,
+                    openEditCustomerFromProduct,
                     openEditProductDialog,
                     saveEditProduct,
                     editingBomVersionCode,
@@ -3105,6 +3365,7 @@
                     npiCategories,
                     projects,
                     selectedProjectId,
+                    getCurrentProjectUrl,
                     createProjectDialogVisible,
                     projectFormData,
                     openCreateProjectDialog,

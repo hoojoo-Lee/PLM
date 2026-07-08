@@ -25,6 +25,9 @@ def create_customer(payload: CustomerCreate, db: Session = Depends(get_db)):
         company_scale=payload.company_scale,
         location=payload.location,
         pm_contact=payload.pm_contact,
+        contact_name=payload.contact_name,
+        contact_email=payload.contact_email,
+        background_notes=payload.background_notes,
         status=payload.status,
         tier=payload.tier,
     )
@@ -91,6 +94,12 @@ def update_customer(customer_id: int, payload: CustomerUpdate, db: Session = Dep
         customer.location = payload.location
     if payload.pm_contact is not None:
         customer.pm_contact = payload.pm_contact
+    if payload.contact_name is not None:
+        customer.contact_name = payload.contact_name
+    if payload.contact_email is not None:
+        customer.contact_email = payload.contact_email
+    if payload.background_notes is not None:
+        customer.background_notes = payload.background_notes
     if payload.status is not None:
         customer.status = payload.status
     if payload.tier is not None:
