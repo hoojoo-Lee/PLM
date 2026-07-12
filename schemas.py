@@ -77,18 +77,12 @@ class TaskTemplateResponse(TaskTemplateBase):
 
 class CustomerBase(BaseSchema):
     name: str = Field(..., max_length=200)
-    background: Optional[str] = None
-    team_info: Optional[str] = None
-    website: Optional[str] = Field(None, max_length=200)
-    industry: Optional[str] = Field(None, max_length=100)
-    company_scale: Optional[str] = Field(None, max_length=50)
-    location: Optional[str] = Field(None, max_length=100)
-    pm_contact: Optional[str] = Field(None, max_length=100)
-    contact_name: Optional[str] = Field(None, max_length=100)
+    background_info: Optional[str] = None
+    customer_team: Optional[str] = Field(None, max_length=500)
+    pm_contacts: Optional[list[str]] = Field(default_factory=list)
     contact_email: Optional[str] = Field(None, max_length=200)
-    background_notes: Optional[str] = None
+    shipping_address: Optional[str] = None
     status: str = Field(default="active", max_length=20)
-    tier: Optional[str] = Field(None, max_length=20)
 
 
 class CustomerCreate(CustomerBase):
@@ -97,18 +91,12 @@ class CustomerCreate(CustomerBase):
 
 class CustomerUpdate(BaseSchema):
     name: Optional[str] = Field(None, max_length=200)
-    background: Optional[str] = None
-    team_info: Optional[str] = None
-    website: Optional[str] = Field(None, max_length=200)
-    industry: Optional[str] = Field(None, max_length=100)
-    company_scale: Optional[str] = Field(None, max_length=50)
-    location: Optional[str] = Field(None, max_length=100)
-    pm_contact: Optional[str] = Field(None, max_length=100)
-    contact_name: Optional[str] = Field(None, max_length=100)
+    background_info: Optional[str] = None
+    customer_team: Optional[str] = Field(None, max_length=500)
+    pm_contacts: Optional[list[str]] = None
     contact_email: Optional[str] = Field(None, max_length=200)
-    background_notes: Optional[str] = None
+    shipping_address: Optional[str] = None
     status: Optional[str] = Field(None, max_length=20)
-    tier: Optional[str] = Field(None, max_length=20)
 
 
 class CustomerResponse(CustomerBase, TimestampSchema):
@@ -119,7 +107,6 @@ class CustomerBrief(BaseSchema):
     id: int
     name: str
     status: str
-    tier: Optional[str] = None
 
 
 # =============================================================================
